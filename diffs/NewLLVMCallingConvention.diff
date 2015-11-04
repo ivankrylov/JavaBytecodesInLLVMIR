@@ -1,0 +1,516 @@
+diff --git a/include/llvm/IR/CallingConv.h b/include/llvm/IR/CallingConv.h
+index 5c82de6..9cf48c5 100644
+--- a/include/llvm/IR/CallingConv.h
++++ b/include/llvm/IR/CallingConv.h
+@@ -45,60 +45,63 @@ namespace CallingConv {
+     // efficient as possible under the assumption that the call is not commonly
+     // executed.  As such, these calls often preserve all registers so that the
+     // call does not break any live ranges in the caller side.
+     Cold = 9,
+ 
+     // GHC - Calling convention used by the Glasgow Haskell Compiler (GHC).
+     GHC = 10,
+ 
+     // HiPE - Calling convention used by the High-Performance Erlang Compiler
+     // (HiPE).
+     HiPE = 11,
+ 
+     // WebKit JS - Calling convention for stack based JavaScript calls
+     WebKit_JS = 12,
+ 
+     // AnyReg - Calling convention for dynamic register based calls (e.g.
+     // stackmap and patchpoint intrinsics).
+     AnyReg = 13,
+ 
+     // PreserveMost - Calling convention for runtime calls that preserves most
+     // registers.
+     PreserveMost = 14,
+ 
+     // PreserveAll - Calling convention for runtime calls that preserves
+     // (almost) all registers.
+     PreserveAll = 15,
+ 
+     // Swift - Calling convention for Swift.
+     Swift = 16,
+ 
++    // HotSpot - Calling convention for HotSpot.
++    HotSpot = 17,
++    
+     // Target - This is the start of the target-specific calling conventions,
+     // e.g. fastcall and thiscall on X86.
+     FirstTargetCC = 64,
+ 
+     /// X86_StdCall - stdcall is the calling conventions mostly used by the
+     /// Win32 API. It is basically the same as the C convention with the
+     /// difference in that the callee is responsible for popping the arguments
+     /// from the stack.
+     X86_StdCall = 64,
+ 
+     /// X86_FastCall - 'fast' analog of X86_StdCall. Passes first two arguments
+     /// in ECX:EDX registers, others - via stack. Callee is responsible for
+     /// stack cleaning.
+     X86_FastCall = 65,
+ 
+     /// ARM_APCS - ARM Procedure Calling Standard calling convention (obsolete,
+     /// but still used on some targets).
+     ARM_APCS = 66,
+ 
+     /// ARM_AAPCS - ARM Architecture Procedure Calling Standard calling
+     /// convention (aka EABI). Soft float variant.
+     ARM_AAPCS = 67,
+ 
+     /// ARM_AAPCS_VFP - Same as ARM_AAPCS, but uses hard floating point ABI.
+     ARM_AAPCS_VFP = 68,
+ 
+     /// MSP430_INTR - Calling convention used for MSP430 interrupt routines.
+     MSP430_INTR = 69,
+ 
+     /// X86_ThisCall - Similar to X86_StdCall. Passes first argument in ECX,
+diff --git a/lib/Target/X86/X86CallingConv.td b/lib/Target/X86/X86CallingConv.td
+index aaabf7a..5fd6c92 100644
+--- a/lib/Target/X86/X86CallingConv.td
++++ b/lib/Target/X86/X86CallingConv.td
+@@ -155,107 +155,123 @@ def RetCC_X86_32_VectorCall : CallingConv<[
+ 
+ // X86-64 C return-value convention.
+ def RetCC_X86_64_C : CallingConv<[
+   // The X86-64 calling convention always returns FP values in XMM0.
+   CCIfType<[f32], CCAssignToReg<[XMM0, XMM1]>>,
+   CCIfType<[f64], CCAssignToReg<[XMM0, XMM1]>>,
+ 
+   // MMX vector types are always returned in XMM0.
+   CCIfType<[x86mmx], CCAssignToReg<[XMM0, XMM1]>>,
+   CCDelegateTo<RetCC_X86Common>
+ ]>;
+ 
+ // X86-Win64 C return-value convention.
+ def RetCC_X86_Win64_C : CallingConv<[
+   // The X86-Win64 calling convention always returns __m64 values in RAX.
+   CCIfType<[x86mmx], CCBitConvertToType<i64>>,
+ 
+   // Otherwise, everything is the same as 'normal' X86-64 C CC.
+   CCDelegateTo<RetCC_X86_64_C>
+ ]>;
+ 
+ // X86-64 HiPE return-value convention.
+ def RetCC_X86_64_HiPE : CallingConv<[
+   // Promote all types to i64
+   CCIfType<[i8, i16, i32], CCPromoteToType<i64>>,
+ 
+   // Return: HP, P, VAL1, VAL2
+   CCIfType<[i64], CCAssignToReg<[R15, RBP, RAX, RDX]>>
+ ]>;
+ 
++// X86-64 HotSpot return-value convention.
++def RetCC_HotSpot : CallingConv<[
++  // Promote all types to i64
++  CCIfType<[i8] , CCAssignToReg<[AL, DL, CL]>>,
++  CCIfType<[i16], CCAssignToReg<[AX, DX, CX]>>,
++  CCIfType<[i32], CCAssignToReg<[EAX, EDX, ECX]>>,
++  CCIfType<[i64], CCAssignToReg<[RAX, RDX, RCX]>>,
++
++  // MMX vector types are always returned in XMM0.
++  CCIfType<[x86mmx], CCAssignToReg<[XMM0, XMM1]>>,
++  CCDelegateTo<RetCC_X86Common>
++]>;
++
+ // X86-64 WebKit_JS return-value convention.
+ def RetCC_X86_64_WebKit_JS : CallingConv<[
+   // Promote all types to i64
+   CCIfType<[i8, i16, i32], CCPromoteToType<i64>>,
+ 
+   // Return: RAX
+   CCIfType<[i64], CCAssignToReg<[RAX]>>
+ ]>;
+ 
+ // X86-64 AnyReg return-value convention. No explicit register is specified for
+ // the return-value. The register allocator is allowed and expected to choose
+ // any free register.
+ //
+ // This calling convention is currently only supported by the stackmap and
+ // patchpoint intrinsics. All other uses will result in an assert on Debug
+ // builds. On Release builds we fallback to the X86 C calling convention.
+ def RetCC_X86_64_AnyReg : CallingConv<[
+   CCCustom<"CC_X86_AnyReg_Error">
+ ]>;
+ 
+ // X86-64 HHVM return-value convention.
+ def RetCC_X86_64_HHVM: CallingConv<[
+   // Promote all types to i64
+   CCIfType<[i8, i16, i32], CCPromoteToType<i64>>,
+ 
+   // Return: could return in any GP register save RSP and R12.
+   CCIfType<[i64], CCAssignToReg<[RBX, RBP, RDI, RSI, RDX, RCX, R8, R9,
+                                  RAX, R10, R11, R13, R14, R15]>>
+ ]>;
+ 
+ // This is the root return-value convention for the X86-32 backend.
+ def RetCC_X86_32 : CallingConv<[
+   // If FastCC, use RetCC_X86_32_Fast.
+   CCIfCC<"CallingConv::Fast", CCDelegateTo<RetCC_X86_32_Fast>>,
+   // If HiPE, use RetCC_X86_32_HiPE.
+   CCIfCC<"CallingConv::HiPE", CCDelegateTo<RetCC_X86_32_HiPE>>,
+   CCIfCC<"CallingConv::X86_VectorCall", CCDelegateTo<RetCC_X86_32_VectorCall>>,
+ 
+   // Otherwise, use RetCC_X86_32_C.
+   CCDelegateTo<RetCC_X86_32_C>
+ ]>;
+ 
+ // This is the root return-value convention for the X86-64 backend.
+ def RetCC_X86_64 : CallingConv<[
+   // HiPE uses RetCC_X86_64_HiPE
+   CCIfCC<"CallingConv::HiPE", CCDelegateTo<RetCC_X86_64_HiPE>>,
+ 
++  // HotSpot Uses RetCC_HotSpot
++  CCIfCC<"CallingConv::HotSpot", CCDelegateTo<RetCC_HotSpot>>,
++
+   // Handle JavaScript calls.
+   CCIfCC<"CallingConv::WebKit_JS", CCDelegateTo<RetCC_X86_64_WebKit_JS>>,
+   CCIfCC<"CallingConv::AnyReg", CCDelegateTo<RetCC_X86_64_AnyReg>>,
+ 
+   // Handle explicit CC selection
+   CCIfCC<"CallingConv::X86_64_Win64", CCDelegateTo<RetCC_X86_Win64_C>>,
+   CCIfCC<"CallingConv::X86_64_SysV", CCDelegateTo<RetCC_X86_64_C>>,
+ 
+   // Handle HHVM calls.
+   CCIfCC<"CallingConv::HHVM", CCDelegateTo<RetCC_X86_64_HHVM>>,
+ 
+   // Mingw64 and native Win64 use Win64 CC
+   CCIfSubtarget<"isTargetWin64()", CCDelegateTo<RetCC_X86_Win64_C>>,
+ 
+   // Otherwise, drop to normal X86-64 CC
+   CCDelegateTo<RetCC_X86_64_C>
+ ]>;
+ 
+ // This is the return-value convention used for the entire X86 backend.
+ def RetCC_X86 : CallingConv<[
+ 
+   // Check if this is the Intel OpenCL built-ins calling convention
+   CCIfCC<"CallingConv::Intel_OCL_BI", CCDelegateTo<RetCC_Intel_OCL_BI>>,
+ 
+   CCIfSubtarget<"is64Bit()", CCDelegateTo<RetCC_X86_64>>,
+   CCDelegateTo<RetCC_X86_32>
+ ]>;
+ 
+ //===----------------------------------------------------------------------===//
+ // X86-64 Argument Calling Conventions
+@@ -418,60 +434,71 @@ def CC_X86_Win64_VectorCall : CallingConv<[
+   CCDelegateTo<CC_X86_Win64_C>
+ ]>;
+ 
+ 
+ def CC_X86_64_GHC : CallingConv<[
+   // Promote i8/i16/i32 arguments to i64.
+   CCIfType<[i8, i16, i32], CCPromoteToType<i64>>,
+ 
+   // Pass in STG registers: Base, Sp, Hp, R1, R2, R3, R4, R5, R6, SpLim
+   CCIfType<[i64],
+             CCAssignToReg<[R13, RBP, R12, RBX, R14, RSI, RDI, R8, R9, R15]>>,
+ 
+   // Pass in STG registers: F1, F2, F3, F4, D1, D2
+   CCIfType<[f32, f64, v16i8, v8i16, v4i32, v2i64, v4f32, v2f64],
+             CCIfSubtarget<"hasSSE1()",
+             CCAssignToReg<[XMM1, XMM2, XMM3, XMM4, XMM5, XMM6]>>>
+ ]>;
+ 
+ def CC_X86_64_HiPE : CallingConv<[
+   // Promote i8/i16/i32 arguments to i64.
+   CCIfType<[i8, i16, i32], CCPromoteToType<i64>>,
+ 
+   // Pass in VM's registers: HP, P, ARG0, ARG1, ARG2, ARG3
+   CCIfType<[i64], CCAssignToReg<[R15, RBP, RSI, RDX, RCX, R8]>>,
+ 
+   // Integer/FP values get stored in stack slots that are 8 bytes in size and
+   // 8-byte aligned if there are no more registers to hold them.
+   CCIfType<[i32, i64, f32, f64], CCAssignToStack<8, 8>>
+ ]>;
+ 
++def CC_HotSpot : CallingConv<[
++  CCIfType<[i8] , CCAssignToReg<[AL, DL, CL]>>,
++  CCIfType<[i16], CCAssignToReg<[AX, DX, CX]>>,
++  CCIfType<[i32], CCAssignToReg<[EAX, EDX, ECX]>>,
++  CCIfType<[i64], CCAssignToReg<[R13, RSP, RAX, RDX, RCX]>>,
++
++  // MMX vector types are always returned in XMM0.
++  CCIfType<[x86mmx], CCAssignToReg<[XMM0, XMM1]>>,
++  CCDelegateTo<RetCC_X86_64_C>
++]>;
++
+ def CC_X86_64_WebKit_JS : CallingConv<[
+   // Promote i8/i16 arguments to i32.
+   CCIfType<[i8, i16], CCPromoteToType<i32>>,
+ 
+   // Only the first integer argument is passed in register.
+   CCIfType<[i32], CCAssignToReg<[EAX]>>,
+   CCIfType<[i64], CCAssignToReg<[RAX]>>,
+ 
+   // The remaining integer arguments are passed on the stack. 32bit integer and
+   // floating-point arguments are aligned to 4 byte and stored in 4 byte slots.
+   // 64bit integer and floating-point arguments are aligned to 8 byte and stored
+   // in 8 byte stack slots.
+   CCIfType<[i32, f32], CCAssignToStack<4, 4>>,
+   CCIfType<[i64, f64], CCAssignToStack<8, 8>>
+ ]>;
+ 
+ // No explicit register is specified for the AnyReg calling convention. The
+ // register allocator may assign the arguments to any free register.
+ //
+ // This calling convention is currently only supported by the stackmap and
+ // patchpoint intrinsics. All other uses will result in an assert on Debug
+ // builds. On Release builds we fallback to the X86 C calling convention.
+ def CC_X86_64_AnyReg : CallingConv<[
+   CCCustom<"CC_X86_AnyReg_Error">
+ ]>;
+ 
+ //===----------------------------------------------------------------------===//
+ // X86 C Calling Convention
+ //===----------------------------------------------------------------------===//
+ 
+@@ -732,110 +759,113 @@ def CC_Intel_OCL_BI : CallingConv<[
+ 
+   // Pass masks in mask registers
+   CCIfType<[v16i1, v8i1], CCAssignToReg<[K1]>>,
+ 
+   CCIfSubtarget<"isTargetWin64()", CCDelegateTo<CC_X86_Win64_C>>,
+   CCIfSubtarget<"is64Bit()",       CCDelegateTo<CC_X86_64_C>>,
+   CCDelegateTo<CC_X86_32_C>
+ ]>;
+ 
+ //===----------------------------------------------------------------------===//
+ // X86 Root Argument Calling Conventions
+ //===----------------------------------------------------------------------===//
+ 
+ // This is the root argument convention for the X86-32 backend.
+ def CC_X86_32 : CallingConv<[
+   CCIfCC<"CallingConv::X86_FastCall", CCDelegateTo<CC_X86_32_FastCall>>,
+   CCIfCC<"CallingConv::X86_VectorCall", CCDelegateTo<CC_X86_32_VectorCall>>,
+   CCIfCC<"CallingConv::X86_ThisCall", CCDelegateTo<CC_X86_32_ThisCall>>,
+   CCIfCC<"CallingConv::Fast", CCDelegateTo<CC_X86_32_FastCC>>,
+   CCIfCC<"CallingConv::GHC", CCDelegateTo<CC_X86_32_GHC>>,
+   CCIfCC<"CallingConv::HiPE", CCDelegateTo<CC_X86_32_HiPE>>,
+ 
+   // Otherwise, drop to normal X86-32 CC
+   CCDelegateTo<CC_X86_32_C>
+ ]>;
+ 
+ // This is the root argument convention for the X86-64 backend.
+ def CC_X86_64 : CallingConv<[
+   CCIfCC<"CallingConv::GHC", CCDelegateTo<CC_X86_64_GHC>>,
+   CCIfCC<"CallingConv::HiPE", CCDelegateTo<CC_X86_64_HiPE>>,
++  CCIfCC<"CallingConv::HotSpot", CCDelegateTo<CC_HotSpot>>,
+   CCIfCC<"CallingConv::WebKit_JS", CCDelegateTo<CC_X86_64_WebKit_JS>>,
+   CCIfCC<"CallingConv::AnyReg", CCDelegateTo<CC_X86_64_AnyReg>>,
+   CCIfCC<"CallingConv::X86_64_Win64", CCDelegateTo<CC_X86_Win64_C>>,
+   CCIfCC<"CallingConv::X86_64_SysV", CCDelegateTo<CC_X86_64_C>>,
+   CCIfCC<"CallingConv::X86_VectorCall", CCDelegateTo<CC_X86_Win64_VectorCall>>,
+   CCIfCC<"CallingConv::HHVM", CCDelegateTo<CC_X86_64_HHVM>>,
+   CCIfCC<"CallingConv::HHVM_C", CCDelegateTo<CC_X86_64_HHVM_C>>,
+ 
+   // Mingw64 and native Win64 use Win64 CC
+   CCIfSubtarget<"isTargetWin64()", CCDelegateTo<CC_X86_Win64_C>>,
+ 
+   // Otherwise, drop to normal X86-64 CC
+   CCDelegateTo<CC_X86_64_C>
+ ]>;
+ 
+ // This is the argument convention used for the entire X86 backend.
+ def CC_X86 : CallingConv<[
+   CCIfCC<"CallingConv::Intel_OCL_BI", CCDelegateTo<CC_Intel_OCL_BI>>,
+   CCIfSubtarget<"is64Bit()", CCDelegateTo<CC_X86_64>>,
+   CCDelegateTo<CC_X86_32>
+ ]>;
+ 
+ //===----------------------------------------------------------------------===//
+ // Callee-saved Registers.
+ //===----------------------------------------------------------------------===//
+ 
+ def CSR_NoRegs : CalleeSavedRegs<(add)>;
+ 
+ def CSR_32 : CalleeSavedRegs<(add ESI, EDI, EBX, EBP)>;
+ def CSR_64 : CalleeSavedRegs<(add RBX, R12, R13, R14, R15, RBP)>;
+ 
+ def CSR_32EHRet : CalleeSavedRegs<(add EAX, EDX, CSR_32)>;
+ def CSR_64EHRet : CalleeSavedRegs<(add RAX, RDX, CSR_64)>;
+ 
+ def CSR_Win64 : CalleeSavedRegs<(add RBX, RBP, RDI, RSI, R12, R13, R14, R15,
+                                      (sequence "XMM%u", 6, 15))>;
+ 
+ // All GPRs - except r11
+ def CSR_64_RT_MostRegs : CalleeSavedRegs<(add CSR_64, RAX, RCX, RDX, RSI, RDI,
+                                               R8, R9, R10, RSP)>;
+ 
+ // All registers - except r11
+ def CSR_64_RT_AllRegs     : CalleeSavedRegs<(add CSR_64_RT_MostRegs,
+                                                  (sequence "XMM%u", 0, 15))>;
+ def CSR_64_RT_AllRegs_AVX : CalleeSavedRegs<(add CSR_64_RT_MostRegs,
+                                                  (sequence "YMM%u", 0, 15))>;
+ 
+ def CSR_64_MostRegs : CalleeSavedRegs<(add RBX, RCX, RDX, RSI, RDI, R8, R9, R10,
+                                            R11, R12, R13, R14, R15, RBP,
+                                            (sequence "XMM%u", 0, 15))>;
+ 
++def CSR_HotSpot : CalleeSavedRegs<(add )>;
++
+ def CSR_64_AllRegs     : CalleeSavedRegs<(add CSR_64_MostRegs, RAX, RSP,
+                                               (sequence "XMM%u", 16, 31))>;
+ def CSR_64_AllRegs_AVX : CalleeSavedRegs<(sub (add CSR_64_MostRegs, RAX, RSP,
+                                                    (sequence "YMM%u", 0, 31)),
+                                               (sequence "XMM%u", 0, 15))>;
+ 
+ // Standard C + YMM6-15
+ def CSR_Win64_Intel_OCL_BI_AVX : CalleeSavedRegs<(add RBX, RBP, RDI, RSI, R12,
+                                                   R13, R14, R15,
+                                                   (sequence "YMM%u", 6, 15))>;
+ 
+ def CSR_Win64_Intel_OCL_BI_AVX512 : CalleeSavedRegs<(add RBX, RBP, RDI, RSI,
+                                                      R12, R13, R14, R15,
+                                                      (sequence "ZMM%u", 6, 21),
+                                                      K4, K5, K6, K7)>;
+ //Standard C + XMM 8-15
+ def CSR_64_Intel_OCL_BI       : CalleeSavedRegs<(add CSR_64,
+                                                  (sequence "XMM%u", 8, 15))>;
+ 
+ //Standard C + YMM 8-15
+ def CSR_64_Intel_OCL_BI_AVX    : CalleeSavedRegs<(add CSR_64,
+                                                   (sequence "YMM%u", 8, 15))>;
+ 
+ def CSR_64_Intel_OCL_BI_AVX512 : CalleeSavedRegs<(add RBX, RDI, RSI, R14, R15,
+                                                   (sequence "ZMM%u", 16, 31),
+                                                   K4, K5, K6, K7)>;
+ 
+ // Only R12 is preserved for PHP calls in HHVM.
+ def CSR_64_HHVM : CalleeSavedRegs<(add R12)>;
+diff --git a/lib/Target/X86/X86FastISel.cpp b/lib/Target/X86/X86FastISel.cpp
+index 5eabd7a..dbbb259 100644
+--- a/lib/Target/X86/X86FastISel.cpp
++++ b/lib/Target/X86/X86FastISel.cpp
+@@ -2759,61 +2759,61 @@ bool X86FastISel::fastLowerArguments() {
+     const TargetRegisterClass *RC = TLI.getRegClassFor(VT);
+     unsigned SrcReg;
+     switch (VT.SimpleTy) {
+     default: llvm_unreachable("Unexpected value type.");
+     case MVT::i32: SrcReg = GPR32ArgRegs[GPRIdx++]; break;
+     case MVT::i64: SrcReg = GPR64ArgRegs[GPRIdx++]; break;
+     case MVT::f32: // fall-through
+     case MVT::f64: SrcReg = XMMArgRegs[FPRIdx++]; break;
+     }
+     unsigned DstReg = FuncInfo.MF->addLiveIn(SrcReg, RC);
+     // FIXME: Unfortunately it's necessary to emit a copy from the livein copy.
+     // Without this, EmitLiveInCopies may eliminate the livein if its only
+     // use is a bitcast (which isn't turned into an instruction).
+     unsigned ResultReg = createResultReg(RC);
+     BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc,
+             TII.get(TargetOpcode::COPY), ResultReg)
+       .addReg(DstReg, getKillRegState(true));
+     updateValueMap(&Arg, ResultReg);
+   }
+   return true;
+ }
+ 
+ static unsigned computeBytesPoppedByCallee(const X86Subtarget *Subtarget,
+                                            CallingConv::ID CC,
+                                            ImmutableCallSite *CS) {
+   if (Subtarget->is64Bit())
+     return 0;
+   if (Subtarget->getTargetTriple().isOSMSVCRT())
+     return 0;
+   if (CC == CallingConv::Fast || CC == CallingConv::GHC ||
+-      CC == CallingConv::HiPE)
++      CC == CallingConv::HiPE || CC == CallingConv::HotSpot )
+     return 0;
+   if (CS && !CS->paramHasAttr(1, Attribute::StructRet))
+     return 0;
+   if (CS && CS->paramHasAttr(1, Attribute::InReg))
+     return 0;
+   return 4;
+ }
+ 
+ bool X86FastISel::fastLowerCall(CallLoweringInfo &CLI) {
+   auto &OutVals       = CLI.OutVals;
+   auto &OutFlags      = CLI.OutFlags;
+   auto &OutRegs       = CLI.OutRegs;
+   auto &Ins           = CLI.Ins;
+   auto &InRegs        = CLI.InRegs;
+   CallingConv::ID CC  = CLI.CallConv;
+   bool &IsTailCall    = CLI.IsTailCall;
+   bool IsVarArg       = CLI.IsVarArg;
+   const Value *Callee = CLI.Callee;
+   MCSymbol *Symbol = CLI.Symbol;
+ 
+   bool Is64Bit        = Subtarget->is64Bit();
+   bool IsWin64        = Subtarget->isCallingConvWin64(CC);
+ 
+   // Handle only C, fastcc, and webkit_js calling conventions for now.
+   switch (CC) {
+   default: return false;
+   case CallingConv::C:
+   case CallingConv::Fast:
+   case CallingConv::WebKit_JS:
+   case CallingConv::X86_FastCall:
+diff --git a/lib/Target/X86/X86RegisterInfo.cpp b/lib/Target/X86/X86RegisterInfo.cpp
+index 8531538..58a8256 100644
+--- a/lib/Target/X86/X86RegisterInfo.cpp
++++ b/lib/Target/X86/X86RegisterInfo.cpp
+@@ -241,60 +241,62 @@ X86RegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
+     return CSR_64_RT_MostRegs_SaveList;
+   case CallingConv::PreserveAll:
+     if (HasAVX)
+       return CSR_64_RT_AllRegs_AVX_SaveList;
+     return CSR_64_RT_AllRegs_SaveList;
+   case CallingConv::Intel_OCL_BI: {
+     if (HasAVX512 && IsWin64)
+       return CSR_Win64_Intel_OCL_BI_AVX512_SaveList;
+     if (HasAVX512 && Is64Bit)
+       return CSR_64_Intel_OCL_BI_AVX512_SaveList;
+     if (HasAVX && IsWin64)
+       return CSR_Win64_Intel_OCL_BI_AVX_SaveList;
+     if (HasAVX && Is64Bit)
+       return CSR_64_Intel_OCL_BI_AVX_SaveList;
+     if (!HasAVX && !IsWin64 && Is64Bit)
+       return CSR_64_Intel_OCL_BI_SaveList;
+     break;
+   }
+   case CallingConv::HHVM:
+     return CSR_64_HHVM_SaveList;
+   case CallingConv::Cold:
+     if (Is64Bit)
+       return CSR_64_MostRegs_SaveList;
+     break;
+   case CallingConv::X86_64_Win64:
+     return CSR_Win64_SaveList;
+   case CallingConv::X86_64_SysV:
+     if (CallsEHReturn)
+       return CSR_64EHRet_SaveList;
+     return CSR_64_SaveList;
++  case CallingConv::HotSpot:
++    return CSR_HotSpot_SaveList;  
+   default:
+     break;
+   }
+ 
+   if (Is64Bit) {
+     if (IsWin64)
+       return CSR_Win64_SaveList;
+     if (CallsEHReturn)
+       return CSR_64EHRet_SaveList;
+     return CSR_64_SaveList;
+   }
+   if (CallsEHReturn)
+     return CSR_32EHRet_SaveList;
+   return CSR_32_SaveList;
+ }
+ 
+ const uint32_t *
+ X86RegisterInfo::getCallPreservedMask(const MachineFunction &MF,
+                                       CallingConv::ID CC) const {
+   const X86Subtarget &Subtarget = MF.getSubtarget<X86Subtarget>();
+   bool HasAVX = Subtarget.hasAVX();
+   bool HasAVX512 = Subtarget.hasAVX512();
+ 
+   switch (CC) {
+   case CallingConv::GHC:
+   case CallingConv::HiPE:
+     return CSR_NoRegs_RegMask;
+   case CallingConv::AnyReg:
+     if (HasAVX)
+       return CSR_64_AllRegs_AVX_RegMask;

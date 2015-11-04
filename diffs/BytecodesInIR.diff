@@ -1,0 +1,1730 @@
+diff -r baa2257348b6 make/bsd/makefiles/vm.make
+--- a/make/bsd/makefiles/vm.make	Thu Sep 03 14:24:41 2015 -0700
++++ b/make/bsd/makefiles/vm.make	Mon Oct 26 12:20:16 2015 +0300
+@@ -191,81 +191,81 @@
+ Src_Dirs/TIERED    := $(CORE_PATHS) $(COMPILER1_PATHS) $(COMPILER2_PATHS)
+ Src_Dirs/ZERO      := $(CORE_PATHS)
+ Src_Dirs/SHARK     := $(CORE_PATHS) $(SHARK_PATHS)
+ Src_Dirs := $(Src_Dirs/$(TYPE))
+ 
+ COMPILER2_SPECIFIC_FILES := opto libadt bcEscapeAnalyzer.cpp c2_\* runtime_\*
+ COMPILER1_SPECIFIC_FILES := c1_\*
+ SHARK_SPECIFIC_FILES     := shark
+ ZERO_SPECIFIC_FILES      := zero
+ 
+ # Always exclude these.
+ Src_Files_EXCLUDE += jsig.c jvmtiEnvRecommended.cpp jvmtiEnvStub.cpp
+ 
+ # Exclude per type.
+ Src_Files_EXCLUDE/CORE      := $(COMPILER1_SPECIFIC_FILES) $(COMPILER2_SPECIFIC_FILES) $(ZERO_SPECIFIC_FILES) $(SHARK_SPECIFIC_FILES) ciTypeFlow.cpp
+ Src_Files_EXCLUDE/COMPILER1 := $(COMPILER2_SPECIFIC_FILES) $(ZERO_SPECIFIC_FILES) $(SHARK_SPECIFIC_FILES) ciTypeFlow.cpp
+ Src_Files_EXCLUDE/COMPILER2 := $(COMPILER1_SPECIFIC_FILES) $(ZERO_SPECIFIC_FILES) $(SHARK_SPECIFIC_FILES)
+ Src_Files_EXCLUDE/TIERED    := $(ZERO_SPECIFIC_FILES) $(SHARK_SPECIFIC_FILES)
+ Src_Files_EXCLUDE/ZERO      := $(COMPILER1_SPECIFIC_FILES) $(COMPILER2_SPECIFIC_FILES) $(SHARK_SPECIFIC_FILES) ciTypeFlow.cpp
+ Src_Files_EXCLUDE/SHARK     := $(COMPILER1_SPECIFIC_FILES) $(COMPILER2_SPECIFIC_FILES) $(ZERO_SPECIFIC_FILES)
+ 
+ Src_Files_EXCLUDE +=  $(Src_Files_EXCLUDE/$(TYPE))
+ 
+ # Special handling of arch model.
+ ifeq ($(Platform_arch_model), x86_32)
+ Src_Files_EXCLUDE += \*x86_64\*
+ endif
+ ifeq ($(Platform_arch_model), x86_64)
+ Src_Files_EXCLUDE += \*x86_32\*
+ endif
+ 
+ # Locate all source files in the given directory, excluding files in Src_Files_EXCLUDE.
+ define findsrc
+ 	$(notdir $(shell find $(1)/. ! -name . -prune \
+ 		-a \( -name \*.c -o -name \*.cpp -o -name \*.s \) \
+ 		-a ! \( -name DUMMY $(addprefix -o -name ,$(Src_Files_EXCLUDE)) \)))
+ endef
+ 
+ Src_Files := $(foreach e,$(Src_Dirs),$(call findsrc,$(e)))
+ 
+-Obj_Files = $(sort $(addsuffix .o,$(basename $(Src_Files))))
++Obj_Files = $(sort $(addsuffix .o,$(basename $(Src_Files)))) arith_bytecodes.o
+ 
+ JVM_OBJ_FILES = $(Obj_Files)
+ 
+ vm_version.o: $(filter-out vm_version.o,$(JVM_OBJ_FILES))
+ 
+ mapfile : $(MAPFILE) vm.def mapfile_ext
+ 	rm -f $@
+ 	awk '{ if ($$0 ~ "INSERT VTABLE SYMBOLS HERE")	\
+                  { system ("cat mapfile_ext"); system ("cat vm.def"); } \
+                else					\
+                  { print $$0 }				\
+              }' > $@ < $(MAPFILE)
+ 
+ mapfile_reorder : mapfile $(REORDERFILE)
+ 	rm -f $@
+ 	cat $^ > $@
+ 
+ vm.def: $(Res_Files) $(Obj_Files)
+ 	sh $(GAMMADIR)/make/bsd/makefiles/build_vm_def.sh *.o > $@
+ 
+ mapfile_ext:
+ 	rm -f $@
+ 	touch $@
+ 	if [ -f $(HS_ALT_MAKE)/bsd/makefiles/mapfile-ext ]; then \
+ 	  cat $(HS_ALT_MAKE)/bsd/makefiles/mapfile-ext > $@; \
+ 	fi
+ 
+ STATIC_CXX = false
+ 
+ ifeq ($(LINK_INTO),AOUT)
+   LIBJVM.o                 =
+   LIBJVM_MAPFILE           =
+   LIBS_VM                  = $(LIBS)
+ else
+   LIBJVM.o                 = $(JVM_OBJ_FILES)
+   LIBJVM_MAPFILE$(LDNOMAP) = mapfile_reorder
+   LFLAGS_VM$(LDNOMAP)      += $(MAPFLAG:FILENAME=$(LIBJVM_MAPFILE))
+   LFLAGS_VM                += $(SONAMEFLAG:SONAME=$(LIBJVM))
+ 
+   ifeq ($(OS_VENDOR), Darwin)
+diff -r baa2257348b6 src/cpu/x86/vm/interp_masm_x86.hpp
+--- a/src/cpu/x86/vm/interp_masm_x86.hpp	Thu Sep 03 14:24:41 2015 -0700
++++ b/src/cpu/x86/vm/interp_masm_x86.hpp	Mon Oct 26 12:20:16 2015 +0300
+@@ -1,83 +1,84 @@
+ /*
+  * Copyright (c) 1997, 2015, Oracle and/or its affiliates. All rights reserved.
+  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+  *
+  * This code is free software; you can redistribute it and/or modify it
+  * under the terms of the GNU General Public License version 2 only, as
+  * published by the Free Software Foundation.
+  *
+  * This code is distributed in the hope that it will be useful, but WITHOUT
+  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+  * version 2 for more details (a copy is included in the LICENSE file that
+  * accompanied this code).
+  *
+  * You should have received a copy of the GNU General Public License version
+  * 2 along with this work; if not, write to the Free Software Foundation,
+  * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+  *
+  * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
+  * or visit www.oracle.com if you need additional information or have any
+  * questions.
+  *
+  */
+ 
+ #ifndef CPU_X86_VM_INTERP_MASM_X86_HPP
+ #define CPU_X86_VM_INTERP_MASM_X86_HPP
+ 
+ #include "asm/macroAssembler.hpp"
+ #include "asm/macroAssembler.inline.hpp"
+ #include "interpreter/invocationCounter.hpp"
+ #include "runtime/frame.hpp"
+ 
+ // This file specializes the assember with interpreter-specific macros
+ 
+ 
+ class InterpreterMacroAssembler: public MacroAssembler {
+ 
+ #ifndef CC_INTERP
+- protected:
++ public:
+   // Interpreter specific version of call_VM_base
+   virtual void call_VM_leaf_base(address entry_point,
+                                  int number_of_arguments);
+ 
++ protected:
+   virtual void call_VM_base(Register oop_result,
+                             Register java_thread,
+                             Register last_java_sp,
+                             address  entry_point,
+                             int number_of_arguments,
+                             bool check_exceptions);
+ 
+   virtual void check_and_handle_popframe(Register java_thread);
+   virtual void check_and_handle_earlyret(Register java_thread);
+ 
+   // base routine for all dispatches
+   void dispatch_base(TosState state, address* table, bool verifyoop = true);
+ #endif // CC_INTERP
+ 
+  public:
+   InterpreterMacroAssembler(CodeBuffer* code) : MacroAssembler(code),
+     _locals_register(LP64_ONLY(r14) NOT_LP64(rdi)),
+     _bcp_register(LP64_ONLY(r13) NOT_LP64(rsi)) {}
+ 
+   void load_earlyret_value(TosState state);
+ 
+ #ifdef CC_INTERP
+   void save_bcp()                                          { /*  not needed in c++ interpreter and harmless */ }
+   void restore_bcp()                                       { /*  not needed in c++ interpreter and harmless */ }
+ 
+   // Helpers for runtime call arguments/results
+   void get_method(Register reg);
+ 
+ #else
+ 
+   // Interpreter-specific registers
+   void save_bcp() {
+     movptr(Address(rbp, frame::interpreter_frame_bcp_offset * wordSize), _bcp_register);
+   }
+ 
+   void restore_bcp() {
+     movptr(_bcp_register, Address(rbp, frame::interpreter_frame_bcp_offset * wordSize));
+   }
+ 
+   void restore_locals() {
+diff -r baa2257348b6 src/cpu/x86/vm/macroAssembler_x86.cpp
+--- a/src/cpu/x86/vm/macroAssembler_x86.cpp	Thu Sep 03 14:24:41 2015 -0700
++++ b/src/cpu/x86/vm/macroAssembler_x86.cpp	Mon Oct 26 12:20:16 2015 +0300
+@@ -516,80 +516,85 @@
+   Address index = adr.index();
+   assert(index._disp == 0, "must not have disp"); // maybe it can?
+   Address array(rscratch1, index._index, index._scale, index._disp);
+   return array;
+ }
+ 
+ void MacroAssembler::call_VM_leaf_base(address entry_point, int num_args) {
+   Label L, E;
+ 
+ #ifdef _WIN64
+   // Windows always allocates space for it's register args
+   assert(num_args <= 4, "only register arguments supported");
+   subq(rsp,  frame::arg_reg_save_area_bytes);
+ #endif
+ 
+   // Align stack if necessary
+   testl(rsp, 15);
+   jcc(Assembler::zero, L);
+ 
+   subq(rsp, 8);
+   {
+     call(RuntimeAddress(entry_point));
+   }
+   addq(rsp, 8);
+   jmp(E);
+ 
+   bind(L);
+   {
+     call(RuntimeAddress(entry_point));
+   }
+ 
+   bind(E);
+ 
+ #ifdef _WIN64
+   // restore stack pointer
+   addq(rsp, frame::arg_reg_save_area_bytes);
+ #endif
+ 
+ }
+ 
++void MacroAssembler::mov_addr(Register dst, AddressLiteral src2) {
++  movq(dst, as_Address(src2));
++}
++
++
+ void MacroAssembler::cmp64(Register src1, AddressLiteral src2) {
+   assert(!src2.is_lval(), "should use cmpptr");
+ 
+   if (reachable(src2)) {
+     cmpq(src1, as_Address(src2));
+   } else {
+     lea(rscratch1, src2);
+     Assembler::cmpq(src1, Address(rscratch1, 0));
+   }
+ }
+ 
+ int MacroAssembler::corrected_idivq(Register reg) {
+   // Full implementation of Java ldiv and lrem; checks for special
+   // case as described in JVM spec., p.243 & p.271.  The function
+   // returns the (pc) offset of the idivl instruction - may be needed
+   // for implicit exceptions.
+   //
+   //         normal case                           special case
+   //
+   // input : rax: dividend                         min_long
+   //         reg: divisor   (may not be eax/edx)   -1
+   //
+   // output: rax: quotient  (= rax idiv reg)       min_long
+   //         rdx: remainder (= rax irem reg)       0
+   assert(reg != rax && reg != rdx, "reg cannot be rax or rdx register");
+   static const int64_t min_long = 0x8000000000000000;
+   Label normal_case, special_case;
+ 
+   // check for special case
+   cmp64(rax, ExternalAddress((address) &min_long));
+   jcc(Assembler::notEqual, normal_case);
+   xorl(rdx, rdx); // prepare rdx for possible special case (where
+                   // remainder = 0)
+   cmpq(reg, -1);
+   jcc(Assembler::equal, special_case);
+ 
+   // handle normal case
+   bind(normal_case);
+   cdqq();
+   int idivq_offset = offset();
+@@ -3307,81 +3312,81 @@
+ 
+   // Come here with result in F-TOS
+   bind(done);
+ }
+ 
+ void MacroAssembler::fpop() {
+   ffree();
+   fincstp();
+ }
+ 
+ void MacroAssembler::fremr(Register tmp) {
+   save_rax(tmp);
+   { Label L;
+     bind(L);
+     fprem();
+     fwait(); fnstsw_ax();
+ #ifdef _LP64
+     testl(rax, 0x400);
+     jcc(Assembler::notEqual, L);
+ #else
+     sahf();
+     jcc(Assembler::parity, L);
+ #endif // _LP64
+   }
+   restore_rax(tmp);
+   // Result is in ST0.
+   // Note: fxch & fpop to get rid of ST1
+   // (otherwise FPU stack could overflow eventually)
+   fxch(1);
+   fpop();
+ }
+ 
+ 
+ void MacroAssembler::incrementl(AddressLiteral dst) {
+   if (reachable(dst)) {
+     incrementl(as_Address(dst));
+   } else {
+     lea(rscratch1, dst);
+     incrementl(Address(rscratch1, 0));
+   }
+-}
++}   
+ 
+ void MacroAssembler::incrementl(ArrayAddress dst) {
+   incrementl(as_Address(dst));
+ }
+ 
+ void MacroAssembler::incrementl(Register reg, int value) {
+   if (value == min_jint) {addl(reg, value) ; return; }
+   if (value <  0) { decrementl(reg, -value); return; }
+   if (value == 0) {                        ; return; }
+   if (value == 1 && UseIncDec) { incl(reg) ; return; }
+   /* else */      { addl(reg, value)       ; return; }
+ }
+ 
+ void MacroAssembler::incrementl(Address dst, int value) {
+   if (value == min_jint) {addl(dst, value) ; return; }
+   if (value <  0) { decrementl(dst, -value); return; }
+   if (value == 0) {                        ; return; }
+   if (value == 1 && UseIncDec) { incl(dst) ; return; }
+   /* else */      { addl(dst, value)       ; return; }
+ }
+ 
+ void MacroAssembler::jump(AddressLiteral dst) {
+   if (reachable(dst)) {
+     jmp_literal(dst.target(), dst.rspec());
+   } else {
+     lea(rscratch1, dst);
+     jmp(rscratch1);
+   }
+ }
+ 
+ void MacroAssembler::jump_cc(Condition cc, AddressLiteral dst) {
+   if (reachable(dst)) {
+     InstructionMark im(this);
+     relocate(dst.reloc());
+     const int short_size = 2;
+     const int long_size = 6;
+     int offs = (intptr_t)dst.target() - ((intptr_t)pc());
+     if (dst.reloc() == relocInfo::none && is8bit(offs - short_size)) {
+       // 0111 tttn #8-bit disp
+       emit_int8(0x70 | cc);
+diff -r baa2257348b6 src/cpu/x86/vm/macroAssembler_x86.hpp
+--- a/src/cpu/x86/vm/macroAssembler_x86.hpp	Thu Sep 03 14:24:41 2015 -0700
++++ b/src/cpu/x86/vm/macroAssembler_x86.hpp	Mon Oct 26 12:20:16 2015 +0300
+@@ -18,85 +18,86 @@
+  *
+  * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
+  * or visit www.oracle.com if you need additional information or have any
+  * questions.
+  *
+  */
+ 
+ #ifndef CPU_X86_VM_MACROASSEMBLER_X86_HPP
+ #define CPU_X86_VM_MACROASSEMBLER_X86_HPP
+ 
+ #include "asm/assembler.hpp"
+ #include "utilities/macros.hpp"
+ #include "runtime/rtmLocking.hpp"
+ 
+ 
+ // MacroAssembler extends Assembler by frequently used macros.
+ //
+ // Instructions for which a 'better' code sequence exists depending
+ // on arguments should also go in here.
+ 
+ class MacroAssembler: public Assembler {
+   friend class LIR_Assembler;
+   friend class Runtime1;      // as_Address()
+ 
+  protected:
+ 
+   Address as_Address(AddressLiteral adr);
+   Address as_Address(ArrayAddress adr);
+ 
+   // Support for VM calls
+   //
+   // This is the base routine called by the different versions of call_VM_leaf. The interpreter
+   // may customize this version by overriding it for its purposes (e.g., to save/restore
+   // additional registers when doing a VM call).
+ #ifdef CC_INTERP
+   // c++ interpreter never wants to use interp_masm version of call_VM
+   #define VIRTUAL
+ #else
+   #define VIRTUAL virtual
+ #endif
+-
++  public:
+   VIRTUAL void call_VM_leaf_base(
+     address entry_point,               // the entry point
+     int     number_of_arguments        // the number of arguments to pop after the call
+   );
++  protected:
+ 
+   // This is the base routine called by the different versions of call_VM. The interpreter
+   // may customize this version by overriding it for its purposes (e.g., to save/restore
+   // additional registers when doing a VM call).
+   //
+   // If no java_thread register is specified (noreg) than rdi will be used instead. call_VM_base
+   // returns the register which contains the thread upon return. If a thread register has been
+   // specified, the return value will correspond to that register. If no last_java_sp is specified
+   // (noreg) than rsp will be used instead.
+   VIRTUAL void call_VM_base(           // returns the register containing the thread upon return
+     Register oop_result,               // where an oop-result ends up if any; use noreg otherwise
+     Register java_thread,              // the thread if computed before     ; use noreg otherwise
+     Register last_java_sp,             // to set up last_Java_frame in stubs; use noreg otherwise
+     address  entry_point,              // the entry point
+     int      number_of_arguments,      // the number of arguments (w/o thread) to pop after the call
+     bool     check_exceptions          // whether to check for pending exceptions after return
+   );
+ 
+   // These routines should emit JVMTI PopFrame and ForceEarlyReturn handling code.
+   // The implementation is only non-empty for the InterpreterMacroAssembler,
+   // as only the interpreter handles PopFrame and ForceEarlyReturn requests.
+   virtual void check_and_handle_popframe(Register java_thread);
+   virtual void check_and_handle_earlyret(Register java_thread);
+ 
+   void call_VM_helper(Register oop_result, address entry_point, int number_of_arguments, bool check_exceptions = true);
+ 
+   // helpers for FPU flag access
+   // tmp is a temporary register, if none is available use noreg
+   void save_rax   (Register tmp);
+   void restore_rax(Register tmp);
+ 
+  public:
+   MacroAssembler(CodeBuffer* code) : Assembler(code) {}
+ 
+   // Support for NULL-checks
+   //
+   // Generates code that causes a NULL OS exception if the content of reg is NULL.
+   // If the accessed location is M[reg + offset] and the offset is known, provide the
+   // offset. No explicit code generation is needed if the offset is within a certain
+   // range (0 <= offset <= page_size).
+@@ -703,80 +704,81 @@
+   void addptr(Register dst, int32_t src);
+   void addptr(Register dst, Register src);
+   void addptr(Register dst, RegisterOrConstant src) {
+     if (src.is_constant()) addptr(dst, (int) src.as_constant());
+     else                   addptr(dst,       src.as_register());
+   }
+ 
+   void andptr(Register dst, int32_t src);
+   void andptr(Register src1, Register src2) { LP64_ONLY(andq(src1, src2)) NOT_LP64(andl(src1, src2)) ; }
+ 
+   void cmp8(AddressLiteral src1, int imm);
+ 
+   // renamed to drag out the casting of address to int32_t/intptr_t
+   void cmp32(Register src1, int32_t imm);
+ 
+   void cmp32(AddressLiteral src1, int32_t imm);
+   // compare reg - mem, or reg - &mem
+   void cmp32(Register src1, AddressLiteral src2);
+ 
+   void cmp32(Register src1, Address src2);
+ 
+ #ifndef _LP64
+   void cmpklass(Address dst, Metadata* obj);
+   void cmpklass(Register dst, Metadata* obj);
+   void cmpoop(Address dst, jobject obj);
+   void cmpoop(Register dst, jobject obj);
+ #endif // _LP64
+ 
+   // NOTE src2 must be the lval. This is NOT an mem-mem compare
+   void cmpptr(Address src1, AddressLiteral src2);
+ 
+   void cmpptr(Register src1, AddressLiteral src2);
+ 
+   void cmpptr(Register src1, Register src2) { LP64_ONLY(cmpq(src1, src2)) NOT_LP64(cmpl(src1, src2)) ; }
+   void cmpptr(Register src1, Address src2) { LP64_ONLY(cmpq(src1, src2)) NOT_LP64(cmpl(src1, src2)) ; }
+   // void cmpptr(Address src1, Register src2) { LP64_ONLY(cmpq(src1, src2)) NOT_LP64(cmpl(src1, src2)) ; }
+ 
+   void cmpptr(Register src1, int32_t src2) { LP64_ONLY(cmpq(src1, src2)) NOT_LP64(cmpl(src1, src2)) ; }
+   void cmpptr(Address src1, int32_t src2) { LP64_ONLY(cmpq(src1, src2)) NOT_LP64(cmpl(src1, src2)) ; }
+ 
++  void mov_addr(Register dst, AddressLiteral src2);
+   // cmp64 to avoild hiding cmpq
+   void cmp64(Register src1, AddressLiteral src);
+ 
+   void cmpxchgptr(Register reg, Address adr);
+ 
+   void locked_cmpxchgptr(Register reg, AddressLiteral adr);
+ 
+ 
+   void imulptr(Register dst, Register src) { LP64_ONLY(imulq(dst, src)) NOT_LP64(imull(dst, src)); }
+   void imulptr(Register dst, Register src, int imm32) { LP64_ONLY(imulq(dst, src, imm32)) NOT_LP64(imull(dst, src, imm32)); }
+ 
+ 
+   void negptr(Register dst) { LP64_ONLY(negq(dst)) NOT_LP64(negl(dst)); }
+ 
+   void notptr(Register dst) { LP64_ONLY(notq(dst)) NOT_LP64(notl(dst)); }
+ 
+   void shlptr(Register dst, int32_t shift);
+   void shlptr(Register dst) { LP64_ONLY(shlq(dst)) NOT_LP64(shll(dst)); }
+ 
+   void shrptr(Register dst, int32_t shift);
+   void shrptr(Register dst) { LP64_ONLY(shrq(dst)) NOT_LP64(shrl(dst)); }
+ 
+   void sarptr(Register dst) { LP64_ONLY(sarq(dst)) NOT_LP64(sarl(dst)); }
+   void sarptr(Register dst, int32_t src) { LP64_ONLY(sarq(dst, src)) NOT_LP64(sarl(dst, src)); }
+ 
+   void subptr(Address dst, int32_t src) { LP64_ONLY(subq(dst, src)) NOT_LP64(subl(dst, src)); }
+ 
+   void subptr(Register dst, Address src) { LP64_ONLY(subq(dst, src)) NOT_LP64(subl(dst, src)); }
+   void subptr(Register dst, int32_t src);
+   // Force generation of a 4 byte immediate value even if it fits into 8bit
+   void subptr_imm32(Register dst, int32_t src);
+   void subptr(Register dst, Register src);
+   void subptr(Register dst, RegisterOrConstant src) {
+     if (src.is_constant()) subptr(dst, (int) src.as_constant());
+     else                   subptr(dst,       src.as_register());
+   }
+ 
+   void sbbptr(Address dst, int32_t src) { LP64_ONLY(sbbq(dst, src)) NOT_LP64(sbbl(dst, src)); }
+   void sbbptr(Register dst, int32_t src) { LP64_ONLY(sbbq(dst, src)) NOT_LP64(sbbl(dst, src)); }
+ 
+diff -r baa2257348b6 src/cpu/x86/vm/templateTable_x86.cpp
+--- a/src/cpu/x86/vm/templateTable_x86.cpp	Thu Sep 03 14:24:41 2015 -0700
++++ b/src/cpu/x86/vm/templateTable_x86.cpp	Mon Oct 26 12:20:16 2015 +0300
+@@ -3,144 +3,170 @@
+  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+  *
+  * This code is free software; you can redistribute it and/or modify it
+  * under the terms of the GNU General Public License version 2 only, as
+  * published by the Free Software Foundation.
+  *
+  * This code is distributed in the hope that it will be useful, but WITHOUT
+  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+  * version 2 for more details (a copy is included in the LICENSE file that
+  * accompanied this code).
+  *
+  * You should have received a copy of the GNU General Public License version
+  * 2 along with this work; if not, write to the Free Software Foundation,
+  * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+  *
+  * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
+  * or visit www.oracle.com if you need additional information or have any
+  * questions.
+  *
+  */
+ 
+ #include "precompiled.hpp"
+ #include "asm/macroAssembler.hpp"
+ #include "interpreter/interpreter.hpp"
+ #include "interpreter/interpreterRuntime.hpp"
+ #include "interpreter/interp_masm.hpp"
+ #include "interpreter/templateTable.hpp"
+ #include "memory/universe.inline.hpp"
+ #include "oops/methodData.hpp"
+ #include "oops/objArrayKlass.hpp"
+ #include "oops/oop.inline.hpp"
+ #include "prims/methodHandles.hpp"
+ #include "runtime/sharedRuntime.hpp"
+ #include "runtime/stubRoutines.hpp"
+ #include "runtime/synchronizer.hpp"
+ #include "utilities/macros.hpp"
+ 
+ #ifndef CC_INTERP
+ 
++extern "C"  {
++    extern void addl_llvm(int64_t R13, int64_t RSP, int64_t RAX);
++    extern void addl_llvm_end();
++    extern void arraylength_llvm();
++    extern void arraylength_llvm_end();
++    extern void iaload_llvm(address a);
++    extern void iaload_llvm_end();
++}
++
++
++
+ #define __ _masm->
+ 
+ // Global Register Names
+ Register rbcp     = LP64_ONLY(r13) NOT_LP64(rsi);
+ Register rlocals  = LP64_ONLY(r14) NOT_LP64(rdi);
+ 
+ // Platform-dependent initialization
+ void TemplateTable::pd_initialize() {
+   // No x86 specific initialization
+ }
+ 
+ // Address Computation: local variables
+ static inline Address iaddress(int n) {
+   return Address(rlocals, Interpreter::local_offset_in_bytes(n));
+ }
+ 
+ static inline Address laddress(int n) {
+   return iaddress(n + 1);
+ }
+ 
+ #ifndef _LP64
+ static inline Address haddress(int n) {
+   return iaddress(n + 0);
+ }
+ #endif
+ 
+ static inline Address faddress(int n) {
+   return iaddress(n);
+ }
+ 
+ static inline Address daddress(int n) {
+   return laddress(n);
+ }
+ 
+ static inline Address aaddress(int n) {
+   return iaddress(n);
+ }
+ 
+ static inline Address iaddress(Register r) {
+   return Address(rlocals, r, Address::times_ptr);
+ }
+ 
+ static inline Address laddress(Register r) {
+   return Address(rlocals, r, Address::times_ptr, Interpreter::local_offset_in_bytes(1));
+ }
+ 
+ #ifndef _LP64
+ static inline Address haddress(Register r)       {
+   return Address(rlocals, r, Interpreter::stackElementScale(), Interpreter::local_offset_in_bytes(0));
+ }
+ #endif
+ 
+ static inline Address faddress(Register r) {
+   return iaddress(r);
+ }
+ 
+ static inline Address daddress(Register r) {
+   return laddress(r);
+ }
+ 
+ static inline Address aaddress(Register r) {
+   return iaddress(r);
+ }
+ 
++// First six arguments are in rdi, rsi, rdx, rcx, r8d, r9d; remaining arguments are on the stack.
++// http://zenit.senecac.on.ca/wiki/index.php/X86_64_Register_and_Instruction_Quick_Start
++
++void TemplateTable::no_dispatch_helper(address f_start, address f_end) {
++    
++    unsigned char end_marker[] = {0x48, 0x03, 0x04, 0x25, 0xef, 0xbe, 0xad, 0xde};
++    int len = (sizeof(end_marker)) / sizeof (end_marker[0]);
++    
++    for (address ptr=f_start; ptr < f_end ; ptr++) {
++        if (memcmp (ptr, end_marker, len) == 0 ) break;      
++        __ emit_int8((unsigned char)*ptr);
++    }
++}
++
++
+ 
+ // expression stack
+ // (Note: Must not use symmetric equivalents at_rsp_m1/2 since they store
+ // data beyond the rsp which is potentially unsafe in an MT environment;
+ // an interrupt may overwrite that data.)
+ static inline Address at_rsp   () {
+   return Address(rsp, 0);
+ }
+ 
+ // At top of Java expression stack which may be different than esp().  It
+ // isn't for category 1 objects.
+ static inline Address at_tos   () {
+   return Address(rsp,  Interpreter::expr_offset_in_bytes(0));
+ }
+ 
+ static inline Address at_tos_p1() {
+   return Address(rsp,  Interpreter::expr_offset_in_bytes(1));
+ }
+ 
+ static inline Address at_tos_p2() {
+   return Address(rsp,  Interpreter::expr_offset_in_bytes(2));
+ }
+ 
+ // Condition conversion
+ static Assembler::Condition j_not(TemplateTable::Condition cc) {
+   switch (cc) {
+   case TemplateTable::equal        : return Assembler::notEqual;
+   case TemplateTable::not_equal    : return Assembler::equal;
+   case TemplateTable::less         : return Assembler::greaterEqual;
+   case TemplateTable::less_equal   : return Assembler::greater;
+   case TemplateTable::greater      : return Assembler::lessEqual;
+   case TemplateTable::greater_equal: return Assembler::less;
+   }
+   ShouldNotReachHere();
+   return Assembler::zero;
+ }
+ 
+ 
+ 
+ // Miscelaneous helper routines
+@@ -665,128 +691,132 @@
+   transition(vtos, dtos);
+   locals_index_wide(rbx);
+   LP64_ONLY(__ movdbl(xmm0, daddress(rbx)));
+   NOT_LP64(__ fld_d(daddress(rbx)));
+ }
+ 
+ void TemplateTable::wide_aload() {
+   transition(vtos, atos);
+   locals_index_wide(rbx);
+   __ movptr(rax, aaddress(rbx));
+ }
+ 
+ void TemplateTable::index_check(Register array, Register index) {
+   // Pop ptr into array
+   __ pop_ptr(array);
+   index_check_without_pop(array, index);
+ }
+ 
+ void TemplateTable::index_check_without_pop(Register array, Register index) {
+   // destroys rbx
+   // check array
+   __ null_check(array, arrayOopDesc::length_offset_in_bytes());
+   // sign extend index for use by indexed load
+   __ movl2ptr(index, index);
+   // check index
+   __ cmpl(index, Address(array, arrayOopDesc::length_offset_in_bytes()));
+   if (index != rbx) {
+     // ??? convention: move aberrant index into rbx for exception message
+     assert(rbx != array, "different registers");
+     __ movl(rbx, index);
+   }
+   __ jump_cc(Assembler::aboveEqual,
+              ExternalAddress(Interpreter::_throw_ArrayIndexOutOfBoundsException_entry));
+ }
+ 
+ 
+ void TemplateTable::iaload() {
+   transition(itos, itos);
+   // rax: index
+   // rdx: array
++  /*
+   index_check(rdx, rax); // kills rbx
+   __ movl(rax, Address(rdx, rax,
+                        Address::times_4,
+-                       arrayOopDesc::base_offset_in_bytes(T_INT)));
++                       arrayOopDesc::base_offset_in_bytes(T_INT))); 
++  */
++  __ mov_addr(rdx, ExternalAddress(Interpreter::_throw_ArrayIndexOutOfBoundsException_entry));
++  no_dispatch_helper((address)iaload_llvm,(address)iaload_llvm_end);
+ }
+ 
+ void TemplateTable::laload() {
+   transition(itos, ltos);
+   // rax: index
+   // rdx: array
+   index_check(rdx, rax); // kills rbx
+   NOT_LP64(__ mov(rbx, rax));
+   // rbx,: index
+   __ movptr(rax, Address(rdx, rbx, Address::times_8, arrayOopDesc::base_offset_in_bytes(T_LONG) + 0 * wordSize));
+   NOT_LP64(__ movl(rdx, Address(rdx, rbx, Address::times_8, arrayOopDesc::base_offset_in_bytes(T_LONG) + 1 * wordSize)));
+ }
+ 
+ 
+ 
+ void TemplateTable::faload() {
+   transition(itos, ftos);
+   // rax: index
+   // rdx: array
+   index_check(rdx, rax); // kills rbx
+   LP64_ONLY(__ movflt(xmm0, Address(rdx, rax,
+                          Address::times_4,
+                          arrayOopDesc::base_offset_in_bytes(T_FLOAT))));
+   NOT_LP64(__ fld_s(Address(rdx, rax, Address::times_4, arrayOopDesc::base_offset_in_bytes(T_FLOAT))));
+ }
+ 
+ void TemplateTable::daload() {
+   transition(itos, dtos);
+   // rax: index
+   // rdx: array
+   index_check(rdx, rax); // kills rbx
+   LP64_ONLY(__ movdbl(xmm0, Address(rdx, rax,
+                           Address::times_8,
+                           arrayOopDesc::base_offset_in_bytes(T_DOUBLE))));
+   NOT_LP64(__ fld_d(Address(rdx, rax, Address::times_8, arrayOopDesc::base_offset_in_bytes(T_DOUBLE))));
+ }
+ 
+ void TemplateTable::aaload() {
+   transition(itos, atos);
+   // rax: index
+   // rdx: array
+   index_check(rdx, rax); // kills rbx
+   __ load_heap_oop(rax, Address(rdx, rax,
+-                                UseCompressedOops ? Address::times_4 : Address::times_ptr,
++                                    UseCompressedOops ? Address::times_4 : Address::times_ptr,
+                                 arrayOopDesc::base_offset_in_bytes(T_OBJECT)));
+ }
+ 
+ void TemplateTable::baload() {
+   transition(itos, itos);
+   // rax: index
+   // rdx: array
+   index_check(rdx, rax); // kills rbx
+   __ load_signed_byte(rax, Address(rdx, rax, Address::times_1, arrayOopDesc::base_offset_in_bytes(T_BYTE)));
+ }
+ 
+ void TemplateTable::caload() {
+   transition(itos, itos);
+   // rax: index
+   // rdx: array
+   index_check(rdx, rax); // kills rbx
+   __ load_unsigned_short(rax, Address(rdx, rax, Address::times_2, arrayOopDesc::base_offset_in_bytes(T_CHAR)));
+ }
+ 
+ // iload followed by caload frequent pair
+ void TemplateTable::fast_icaload() {
+   transition(vtos, itos);
+   // load index out of locals
+   locals_index(rbx);
+   __ movl(rax, iaddress(rbx));
+ 
+   // rax: index
+   // rdx: array
+   index_check(rdx, rax); // kills rbx
+   __ load_unsigned_short(rax,
+                          Address(rdx, rax,
+                                  Address::times_2,
+                                  arrayOopDesc::base_offset_in_bytes(T_CHAR)));
+ }
+ 
+ 
+ void TemplateTable::saload() {
+   transition(itos, itos);
+   // rax: index
+   // rdx: array
+@@ -1218,101 +1248,107 @@
+   // stack: ..., a, c, c, b, c
+   __ load_ptr( 4, rcx);  // load a
+   __ store_ptr(2, rcx);  // store a in 2nd c
+   // stack: ..., a, c, a, b, c
+   __ store_ptr(4, rax);  // store b in a
+   // stack: ..., b, c, a, b, c
+ }
+ 
+ void TemplateTable::dup2_x2() {
+   transition(vtos, vtos);
+   // stack: ..., a, b, c, d
+   __ load_ptr( 0, rcx);  // load d
+   __ load_ptr( 1, rax);  // load c
+   __ push_ptr(rax);      // push c
+   __ push_ptr(rcx);      // push d
+   // stack: ..., a, b, c, d, c, d
+   __ load_ptr( 4, rax);  // load b
+   __ store_ptr(2, rax);  // store b in d
+   __ store_ptr(4, rcx);  // store d in b
+   // stack: ..., a, d, c, b, c, d
+   __ load_ptr( 5, rcx);  // load a
+   __ load_ptr( 3, rax);  // load c
+   __ store_ptr(3, rcx);  // store a in c
+   __ store_ptr(5, rax);  // store c in a
+   // stack: ..., c, d, a, b, c, d
+ }
+ 
+ void TemplateTable::swap() {
+   transition(vtos, vtos);
+   // stack: ..., a, b
+   __ load_ptr( 1, rcx);  // load a
+   __ load_ptr( 0, rax);  // load b
+   __ store_ptr(0, rcx);  // store a in b
+   __ store_ptr(1, rax);  // store b in a
+   // stack: ..., b, a
+ }
+ 
+ void TemplateTable::iop2(Operation op) {
+   transition(itos, itos);
+   switch (op) {
+-  case add  :                    __ pop_i(rdx); __ addl (rax, rdx); break;
+-  case sub  : __ movl(rdx, rax); __ pop_i(rax); __ subl (rax, rdx); break;
++  case add  :
++  {
++      __ pop_i(rdx); __ addl (rax, rdx); break;
++  }
++  case sub  : 
++      __ movl(rdx, rax); __ pop_i(rax); __ subl (rax, rdx); break;
+   case mul  :                    __ pop_i(rdx); __ imull(rax, rdx); break;
+   case _and :                    __ pop_i(rdx); __ andl (rax, rdx); break;
+   case _or  :                    __ pop_i(rdx); __ orl  (rax, rdx); break;
+   case _xor :                    __ pop_i(rdx); __ xorl (rax, rdx); break;
+   case shl  : __ movl(rcx, rax); __ pop_i(rax); __ shll (rax);      break;
+   case shr  : __ movl(rcx, rax); __ pop_i(rax); __ sarl (rax);      break;
+   case ushr : __ movl(rcx, rax); __ pop_i(rax); __ shrl (rax);      break;
+   default   : ShouldNotReachHere();
+   }
+ }
+ 
++
+ void TemplateTable::lop2(Operation op) {
+   transition(ltos, ltos);
+ #ifdef _LP64
+   switch (op) {
+-  case add  :                    __ pop_l(rdx); __ addptr(rax, rdx); break;
++  case add  :  no_dispatch_helper((address)addl_llvm,(address)addl_llvm_end);  break;
++  //case add  :                    __ pop_l(rdx); __ addptr(rax, rdx); break;
+   case sub  : __ mov(rdx, rax);  __ pop_l(rax); __ subptr(rax, rdx); break;
+   case _and :                    __ pop_l(rdx); __ andptr(rax, rdx); break;
+-  case _or  :                    __ pop_l(rdx); __ orptr (rax, rdx); break;
++      case _or  :                    __ pop_l(rdx); __ orptr (rax, rdx); break;
+   case _xor :                    __ pop_l(rdx); __ xorptr(rax, rdx); break;
+   default   : ShouldNotReachHere();
+   }
+ #else
+   __ pop_l(rbx, rcx);
+   switch (op) {
+     case add  : __ addl(rax, rbx); __ adcl(rdx, rcx); break;
+     case sub  : __ subl(rbx, rax); __ sbbl(rcx, rdx);
+                 __ mov (rax, rbx); __ mov (rdx, rcx); break;
+     case _and : __ andl(rax, rbx); __ andl(rdx, rcx); break;
+     case _or  : __ orl (rax, rbx); __ orl (rdx, rcx); break;
+     case _xor : __ xorl(rax, rbx); __ xorl(rdx, rcx); break;
+     default   : ShouldNotReachHere();
+   }
+ #endif
+ }
+ 
+ void TemplateTable::idiv() {
+   transition(itos, itos);
+   __ movl(rcx, rax);
+   __ pop_i(rax);
+   // Note: could xor rax and ecx and compare with (-1 ^ min_int). If
+   //       they are not equal, one could do a normal division (no correction
+   //       needed), which may speed up this implementation for the common case.
+   //       (see also JVM spec., p.243 & p.271)
+   __ corrected_idivl(rcx);
+ }
+ 
+ void TemplateTable::irem() {
+   transition(itos, itos);
+   __ movl(rcx, rax);
+   __ pop_i(rax);
+   // Note: could xor rax and ecx and compare with (-1 ^ min_int). If
+   //       they are not equal, one could do a normal division (no correction
+   //       needed), which may speed up this implementation for the common case.
+   //       (see also JVM spec., p.243 & p.271)
+   __ corrected_idivl(rcx);
+   __ movl(rax, rdx);
+ }
+ 
+@@ -3846,83 +3882,86 @@
+   }
+ 
+   // slow case
+   __ bind(slow_case);
+   __ pop(rcx);   // restore stack pointer to what it was when we came in.
+   __ bind(slow_case_no_pop);
+ 
+   Register rarg1 = LP64_ONLY(c_rarg1) NOT_LP64(rax);
+   Register rarg2 = LP64_ONLY(c_rarg2) NOT_LP64(rdx);
+ 
+   __ get_constant_pool(rarg1);
+   __ get_unsigned_2_byte_index_at_bcp(rarg2, 1);
+   call_VM(rax, CAST_FROM_FN_PTR(address, InterpreterRuntime::_new), rarg1, rarg2);
+    __ verify_oop(rax);
+ 
+   // continue
+   __ bind(done);
+ }
+ 
+ void TemplateTable::newarray() {
+   transition(itos, atos);
+   Register rarg1 = LP64_ONLY(c_rarg1) NOT_LP64(rdx);
+   __ load_unsigned_byte(rarg1, at_bcp(1));
+   call_VM(rax, CAST_FROM_FN_PTR(address, InterpreterRuntime::newarray),
+           rarg1, rax);
+ }
+ 
+ void TemplateTable::anewarray() {
+   transition(itos, atos);
+ 
+   Register rarg1 = LP64_ONLY(c_rarg1) NOT_LP64(rcx);
+   Register rarg2 = LP64_ONLY(c_rarg2) NOT_LP64(rdx);
+ 
+   __ get_unsigned_2_byte_index_at_bcp(rarg2, 1);
+   __ get_constant_pool(rarg1);
+   call_VM(rax, CAST_FROM_FN_PTR(address, InterpreterRuntime::anewarray),
+           rarg1, rarg2, rax);
+ }
+ 
+ void TemplateTable::arraylength() {
+-  transition(atos, itos);
++  no_dispatch_helper((address)arraylength_llvm,(address)arraylength_llvm_end);
++  /*
++   * transition(atos, itos);
+   __ null_check(rax, arrayOopDesc::length_offset_in_bytes());
+   __ movl(rax, Address(rax, arrayOopDesc::length_offset_in_bytes()));
++   */
+ }
+ 
+ void TemplateTable::checkcast() {
+   transition(atos, atos);
+   Label done, is_null, ok_is_subtype, quicked, resolved;
+   __ testptr(rax, rax); // object is in rax
+   __ jcc(Assembler::zero, is_null);
+ 
+   // Get cpool & tags index
+   __ get_cpool_and_tags(rcx, rdx); // rcx=cpool, rdx=tags array
+   __ get_unsigned_2_byte_index_at_bcp(rbx, 1); // rbx=index
+   // See if bytecode has already been quicked
+   __ cmpb(Address(rdx, rbx,
+                   Address::times_1,
+                   Array<u1>::base_offset_in_bytes()),
+           JVM_CONSTANT_Class);
+   __ jcc(Assembler::equal, quicked);
+   __ push(atos); // save receiver for result, and for GC
+   call_VM(noreg, CAST_FROM_FN_PTR(address, InterpreterRuntime::quicken_io_cc));
+ 
+   // vm_result_2 has metadata result
+ #ifndef _LP64
+   // borrow rdi from locals
+   __ get_thread(rdi);
+   __ get_vm_result_2(rax, rdi);
+   __ restore_locals();
+ #else
+   __ get_vm_result_2(rax, r15_thread);
+ #endif
+ 
+   __ pop_ptr(rdx); // restore receiver
+   __ jmpb(resolved);
+ 
+   // Get superklass in rax and subklass in rbx
+   __ bind(quicked);
+   __ mov(rdx, rax); // Save object in rdx; rax needed for subtype check
+   __ movptr(rax, Address(rcx, rbx,
+                        Address::times_ptr, sizeof(ConstantPool)));
+ 
+   __ bind(resolved);
+diff -r baa2257348b6 src/share/vm/classfile/classFileParser.cpp
+--- a/src/share/vm/classfile/classFileParser.cpp	Thu Sep 03 14:24:41 2015 -0700
++++ b/src/share/vm/classfile/classFileParser.cpp	Mon Oct 26 12:20:16 2015 +0300
+@@ -1716,81 +1716,81 @@
+       coll->set_contended_group(group_index);
+     }
+   }
+ }
+ 
+ ClassFileParser::AnnotationCollector::ID
+ ClassFileParser::AnnotationCollector::annotation_index(ClassLoaderData* loader_data,
+                                                                 Symbol* name) {
+   vmSymbols::SID sid = vmSymbols::find_sid(name);
+   // Privileged code can use all annotations.  Other code silently drops some.
+   const bool privileged = loader_data->is_the_null_class_loader_data() ||
+                           loader_data->is_ext_class_loader_data() ||
+                           loader_data->is_anonymous();
+   switch (sid) {
+   case vmSymbols::VM_SYMBOL_ENUM_NAME(sun_reflect_CallerSensitive_signature):
+     if (_location != _in_method)  break;  // only allow for methods
+     if (!privileged)              break;  // only allow in privileged code
+     return _method_CallerSensitive;
+   case vmSymbols::VM_SYMBOL_ENUM_NAME(java_lang_invoke_ForceInline_signature):
+     if (_location != _in_method)  break;  // only allow for methods
+     if (!privileged)              break;  // only allow in privileged code
+     return _method_ForceInline;
+   case vmSymbols::VM_SYMBOL_ENUM_NAME(java_lang_invoke_DontInline_signature):
+     if (_location != _in_method)  break;  // only allow for methods
+     if (!privileged)              break;  // only allow in privileged code
+     return _method_DontInline;
+   case vmSymbols::VM_SYMBOL_ENUM_NAME(java_lang_invoke_InjectedProfile_signature):
+     if (_location != _in_method)  break;  // only allow for methods
+     if (!privileged)              break;  // only allow in privileged code
+     return _method_InjectedProfile;
+   case vmSymbols::VM_SYMBOL_ENUM_NAME(java_lang_invoke_LambdaForm_Compiled_signature):
+     if (_location != _in_method)  break;  // only allow for methods
+     if (!privileged)              break;  // only allow in privileged code
+     return _method_LambdaForm_Compiled;
+   case vmSymbols::VM_SYMBOL_ENUM_NAME(java_lang_invoke_LambdaForm_Hidden_signature):
+     if (_location != _in_method)  break;  // only allow for methods
+     if (!privileged)              break;  // only allow in privileged code
+     return _method_LambdaForm_Hidden;
+   case vmSymbols::VM_SYMBOL_ENUM_NAME(jdk_internal_HotSpotIntrinsicCandidate_signature):
+     if (_location != _in_method)  break;  // only allow for methods
+-    if (!privileged)              break;  // only allow in privileged code
++    //if (!privileged)              break;  // only allow in privileged code
+     return _method_HotSpotIntrinsicCandidate;
+   case vmSymbols::VM_SYMBOL_ENUM_NAME(java_lang_invoke_Stable_signature):
+     if (_location != _in_field)   break;  // only allow for fields
+     if (!privileged)              break;  // only allow in privileged code
+     return _field_Stable;
+   case vmSymbols::VM_SYMBOL_ENUM_NAME(sun_misc_Contended_signature):
+     if (_location != _in_field && _location != _in_class)          break;  // only allow for fields and classes
+     if (!EnableContended || (RestrictContended && !privileged))    break;  // honor privileges
+     return _sun_misc_Contended;
+   default: break;
+   }
+   return AnnotationCollector::_unknown;
+ }
+ 
+ void ClassFileParser::FieldAnnotationCollector::apply_to(FieldInfo* f) {
+   if (is_contended())
+     f->set_contended_group(contended_group());
+   if (is_stable())
+     f->set_stable(true);
+ }
+ 
+ ClassFileParser::FieldAnnotationCollector::~FieldAnnotationCollector() {
+   // If there's an error deallocate metadata for field annotations
+   MetadataFactory::free_array<u1>(_loader_data, _field_annotations);
+   MetadataFactory::free_array<u1>(_loader_data, _field_type_annotations);
+ }
+ 
+ void ClassFileParser::MethodAnnotationCollector::apply_to(methodHandle m) {
+   if (has_annotation(_method_CallerSensitive))
+     m->set_caller_sensitive(true);
+   if (has_annotation(_method_ForceInline))
+     m->set_force_inline(true);
+   if (has_annotation(_method_DontInline))
+     m->set_dont_inline(true);
+   if (has_annotation(_method_InjectedProfile))
+     m->set_has_injected_profile(true);
+   if (has_annotation(_method_LambdaForm_Compiled) && m->intrinsic_id() == vmIntrinsics::_none)
+     m->set_intrinsic_id(vmIntrinsics::_compiledLambdaForm);
+   if (has_annotation(_method_LambdaForm_Hidden))
+     m->set_hidden(true);
+diff -r baa2257348b6 src/share/vm/interpreter/interpreterRuntime.cpp
+--- a/src/share/vm/interpreter/interpreterRuntime.cpp	Thu Sep 03 14:24:41 2015 -0700
++++ b/src/share/vm/interpreter/interpreterRuntime.cpp	Mon Oct 26 12:20:16 2015 +0300
+@@ -1,41 +1,41 @@
+-/*
++    /*
+  * Copyright (c) 1997, 2015, Oracle and/or its affiliates. All rights reserved.
+  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+  *
+  * This code is free software; you can redistribute it and/or modify it
+  * under the terms of the GNU General Public License version 2 only, as
+  * published by the Free Software Foundation.
+  *
+  * This code is distributed in the hope that it will be useful, but WITHOUT
+  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+  * version 2 for more details (a copy is included in the LICENSE file that
+  * accompanied this code).
+  *
+  * You should have received a copy of the GNU General Public License version
+  * 2 along with this work; if not, write to the Free Software Foundation,
+  * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+  *
+  * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
+  * or visit www.oracle.com if you need additional information or have any
+  * questions.
+  *
+  */
+ 
+ #include "precompiled.hpp"
+ #include "classfile/javaClasses.inline.hpp"
+ #include "classfile/systemDictionary.hpp"
+ #include "classfile/vmSymbols.hpp"
+ #include "code/codeCache.hpp"
+ #include "code/codeCacheExtensions.hpp"
+ #include "compiler/compileBroker.hpp"
+ #include "compiler/disassembler.hpp"
+ #include "gc/shared/collectedHeap.hpp"
+ #include "interpreter/interpreter.hpp"
+ #include "interpreter/interpreterRuntime.hpp"
+ #include "interpreter/linkResolver.hpp"
+ #include "interpreter/templateTable.hpp"
+ #include "memory/oopFactory.hpp"
+ #include "memory/universe.inline.hpp"
+ #include "oops/constantPool.hpp"
+ #include "oops/instanceKlass.hpp"
+@@ -1359,40 +1359,48 @@
+   jint bci = fr.interpreter_frame_bci();
+   methodHandle mh(thread, fr.interpreter_frame_method());
+   Bytecode_invoke invoke(mh, bci);
+   ArgumentSizeComputer asc(invoke.signature());
+   int size_of_arguments = (asc.size() + (invoke.has_receiver() ? 1 : 0)); // receiver
+   Copy::conjoint_jbytes(src_address, dest_address,
+                        size_of_arguments * Interpreter::stackElementSize);
+ IRT_END
+ #endif
+ 
+ #if INCLUDE_JVMTI
+ // This is a support of the JVMTI PopFrame interface.
+ // Make sure it is an invokestatic of a polymorphic intrinsic that has a member_name argument
+ // and return it as a vm_result so that it can be reloaded in the list of invokestatic parameters.
+ // The member_name argument is a saved reference (in local#0) to the member_name.
+ // For backward compatibility with some JDK versions (7, 8) it can also be a direct method handle.
+ // FIXME: remove DMH case after j.l.i.InvokerBytecodeGenerator code shape is updated.
+ IRT_ENTRY(void, InterpreterRuntime::member_name_arg_or_null(JavaThread* thread, address member_name,
+                                                             Method* method, address bcp))
+   Bytecodes::Code code = Bytecodes::code_at(method, bcp);
+   if (code != Bytecodes::_invokestatic) {
+     return;
+   }
+   ConstantPool* cpool = method->constants();
+   int cp_index = Bytes::get_native_u2(bcp + 1) + ConstantPool::CPCACHE_INDEX_TAG;
+   Symbol* cname = cpool->klass_name_at(cpool->klass_ref_index_at(cp_index));
+   Symbol* mname = cpool->name_ref_at(cp_index);
+ 
+   if (MethodHandles::has_member_arg(cname, mname)) {
+     oop member_name_oop = (oop) member_name;
+     if (java_lang_invoke_DirectMethodHandle::is_instance(member_name_oop)) {
+       // FIXME: remove after j.l.i.InvokerBytecodeGenerator code shape is updated.
+       member_name_oop = java_lang_invoke_DirectMethodHandle::member(member_name_oop);
+     }
+     thread->set_vm_result(member_name_oop);
+   } else {
+     thread->set_vm_result(NULL);
+   }
+ IRT_END
+ #endif // INCLUDE_JVMTI
++          
++
++extern "C" {
++    int64_t* hotspot_dispatch_table(int32_t state) {
++      return
++        (int64_t*) (address*) Interpreter::dispatch_table((TosState)state);
++    }
++}
+diff -r baa2257348b6 src/share/vm/interpreter/templateInterpreter.cpp
+--- a/src/share/vm/interpreter/templateInterpreter.cpp	Thu Sep 03 14:24:41 2015 -0700
++++ b/src/share/vm/interpreter/templateInterpreter.cpp	Mon Oct 26 12:20:16 2015 +0300
+@@ -1,77 +1,78 @@
+ /*
+  * Copyright (c) 1997, 2015, Oracle and/or its affiliates. All rights reserved.
+  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+  *
+  * This code is free software; you can redistribute it and/or modify it
+  * under the terms of the GNU General Public License version 2 only, as
+  * published by the Free Software Foundation.
+  *
+  * This code is distributed in the hope that it will be useful, but WITHOUT
+  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+  * version 2 for more details (a copy is included in the LICENSE file that
+  * accompanied this code).
+  *
+  * You should have received a copy of the GNU General Public License version
+  * 2 along with this work; if not, write to the Free Software Foundation,
+  * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+  *
+  * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
+  * or visit www.oracle.com if you need additional information or have any
+  * questions.
+  *
+  */
+ 
+ #include "precompiled.hpp"
+ #include "code/codeCacheExtensions.hpp"
+ #include "interpreter/interpreter.hpp"
+ #include "interpreter/interpreterGenerator.hpp"
+ #include "interpreter/interpreterRuntime.hpp"
+ #include "interpreter/interp_masm.hpp"
+ #include "interpreter/templateInterpreter.hpp"
+ #include "interpreter/templateTable.hpp"
+ 
+ #ifndef CC_INTERP
+ 
+ # define __ _masm->
+ 
++
+ void TemplateInterpreter::initialize() {
+   if (_code != NULL) return;
+   // assertions
+   assert((int)Bytecodes::number_of_codes <= (int)DispatchTable::length,
+          "dispatch table too small");
+ 
+   AbstractInterpreter::initialize();
+ 
+   TemplateTable::initialize();
+ 
+   // generate interpreter
+   { ResourceMark rm;
+     TraceTime timer("Interpreter generation", TraceStartupTime);
+     int code_size = InterpreterCodeSize;
+     NOT_PRODUCT(code_size *= 4;)  // debug uses extra interpreter code space
+ #if INCLUDE_JVMTI
+     if (CodeCacheExtensions::saving_generated_interpreter()) {
+       // May requires several versions of the codelets.
+       // Final size will automatically be optimized.
+       code_size *= 2;
+     }
+ #endif
+     _code = new StubQueue(new InterpreterCodeletInterface, code_size, NULL,
+                           "Interpreter");
+     InterpreterGenerator g(_code);
+   }
+   if (PrintInterpreter) {
+     if (CodeCacheExtensions::saving_generated_interpreter() &&
+         CodeCacheExtensions::use_pregenerated_interpreter()) {
+       ResourceMark rm;
+       tty->print("Printing the newly generated interpreter first");
+       print();
+       tty->print("Printing the pregenerated interpreter next");
+     }
+   }
+ 
+   // Install the pregenerated interpreter code before printing it
+   CodeCacheExtensions::complete_step(CodeCacheExtensionsSteps::TemplateInterpreter);
+ 
+   if (PrintInterpreter) {
+@@ -200,80 +201,101 @@
+ address    TemplateInterpreter::_throw_NullPointerException_entry           = NULL;
+ address    TemplateInterpreter::_throw_StackOverflowError_entry             = NULL;
+ address    TemplateInterpreter::_throw_exception_entry                      = NULL;
+ 
+ #ifndef PRODUCT
+ EntryPoint TemplateInterpreter::_trace_code;
+ #endif // !PRODUCT
+ EntryPoint TemplateInterpreter::_return_entry[TemplateInterpreter::number_of_return_entries];
+ EntryPoint TemplateInterpreter::_earlyret_entry;
+ EntryPoint TemplateInterpreter::_deopt_entry [TemplateInterpreter::number_of_deopt_entries ];
+ EntryPoint TemplateInterpreter::_continuation_entry;
+ EntryPoint TemplateInterpreter::_safept_entry;
+ 
+ address TemplateInterpreter::_invoke_return_entry[TemplateInterpreter::number_of_return_addrs];
+ address TemplateInterpreter::_invokeinterface_return_entry[TemplateInterpreter::number_of_return_addrs];
+ address TemplateInterpreter::_invokedynamic_return_entry[TemplateInterpreter::number_of_return_addrs];
+ 
+ DispatchTable TemplateInterpreter::_active_table;
+ DispatchTable TemplateInterpreter::_normal_table;
+ DispatchTable TemplateInterpreter::_safept_table;
+ address    TemplateInterpreter::_wentry_point[DispatchTable::length];
+ 
+ TemplateInterpreterGenerator::TemplateInterpreterGenerator(StubQueue* _code): AbstractInterpreterGenerator(_code) {
+   _unimplemented_bytecode    = NULL;
+   _illegal_bytecode_sequence = NULL;
+ }
+ 
+ static const BasicType types[Interpreter::number_of_result_handlers] = {
+   T_BOOLEAN,
+   T_CHAR   ,
+   T_BYTE   ,
+   T_SHORT  ,
+   T_INT    ,
+   T_LONG   ,
+   T_VOID   ,
+   T_FLOAT  ,
+   T_DOUBLE ,
+   T_OBJECT
+ };
+ 
++typedef void (*void_fn_ptr)();
++
++extern "C" {
++  void_fn_ptr external_throw_ArrayIndexOutOfBoundsException_entry;
++  void_fn_ptr external_throw_ArrayStoreException_entry;
++  void_fn_ptr external_throw_ArithmeticException_entry;
++  void_fn_ptr external_throw_ClassCastException_entry;
++  void_fn_ptr external_throw_NullPointerException_entry;
++  void_fn_ptr external_throw_StackOverflowError_entry;
++}
++
++void TemplateInterpreterGenerator::set_external_pointers() {
++  external_throw_ArrayIndexOutOfBoundsException_entry=(void_fn_ptr)Interpreter::_throw_ArrayIndexOutOfBoundsException_entry;
++  external_throw_ArrayStoreException_entry=(void_fn_ptr)Interpreter::_throw_ArrayStoreException_entry;
++  external_throw_ArithmeticException_entry=(void_fn_ptr)Interpreter::_throw_ArithmeticException_entry;
++  external_throw_ClassCastException_entry=(void_fn_ptr)Interpreter::_throw_ClassCastException_entry;
++  external_throw_NullPointerException_entry=(void_fn_ptr)Interpreter::_throw_NullPointerException_entry;
++  external_throw_StackOverflowError_entry=(void_fn_ptr)Interpreter::_throw_StackOverflowError_entry;
++  printf("Set the handler address to %p\n", external_throw_ArrayIndexOutOfBoundsException_entry);
++}
++
+ void TemplateInterpreterGenerator::generate_all() {
+   // Loop, in case we need several variants of the interpreter entries
+   do {
+     if (!CodeCacheExtensions::skip_code_generation()) {
+       // bypass code generation when useless
+       AbstractInterpreterGenerator::generate_all();
+ 
+       { CodeletMark cm(_masm, "error exits");
+         _unimplemented_bytecode    = generate_error_exit("unimplemented bytecode");
+         _illegal_bytecode_sequence = generate_error_exit("illegal bytecode sequence - method not verified");
+       }
+ 
+ #ifndef PRODUCT
+       if (TraceBytecodes) {
+         CodeletMark cm(_masm, "bytecode tracing support");
+         Interpreter::_trace_code =
+           EntryPoint(
+                      generate_trace_code(btos),
+                      generate_trace_code(ctos),
+                      generate_trace_code(stos),
+                      generate_trace_code(atos),
+                      generate_trace_code(itos),
+                      generate_trace_code(ltos),
+                      generate_trace_code(ftos),
+                      generate_trace_code(dtos),
+                      generate_trace_code(vtos)
+                      );
+       }
+ #endif // !PRODUCT
+ 
+       { CodeletMark cm(_masm, "return entry points");
+         const int index_size = sizeof(u2);
+         for (int i = 0; i < Interpreter::number_of_return_entries; i++) {
+           Interpreter::_return_entry[i] =
+             EntryPoint(
+                        generate_return_entry_for(itos, i, index_size),
+                        generate_return_entry_for(itos, i, index_size),
+                        generate_return_entry_for(itos, i, index_size),
+                        generate_return_entry_for(atos, i, index_size),
+                        generate_return_entry_for(itos, i, index_size),
+@@ -390,160 +412,174 @@
+ 
+ 
+ 
+ #define method_entry(kind)                                              \
+       { CodeletMark cm(_masm, "method entry point (kind = " #kind ")"); \
+         Interpreter::_entry_table[Interpreter::kind] = ((InterpreterGenerator*)this)->generate_method_entry(Interpreter::kind); \
+       }
+ 
+       // all non-native method kinds
+       method_entry(zerolocals)
+         method_entry(zerolocals_synchronized)
+         method_entry(empty)
+         method_entry(accessor)
+         method_entry(abstract)
+         method_entry(java_lang_math_sin  )
+         method_entry(java_lang_math_cos  )
+         method_entry(java_lang_math_tan  )
+         method_entry(java_lang_math_abs  )
+         method_entry(java_lang_math_sqrt )
+         method_entry(java_lang_math_log  )
+         method_entry(java_lang_math_log10)
+         method_entry(java_lang_math_exp  )
+         method_entry(java_lang_math_pow  )
+         method_entry(java_lang_ref_reference_get)
+ 
+         if (UseCRC32Intrinsics) {
+           method_entry(java_util_zip_CRC32_update)
+             method_entry(java_util_zip_CRC32_updateBytes)
+             method_entry(java_util_zip_CRC32_updateByteBuffer)
+             }
+ 
+       initialize_method_handle_entries();
+ 
+       // all native method kinds (must be one contiguous block)
+       Interpreter::_native_entry_begin = Interpreter::code()->code_end();
+       method_entry(native)
+         method_entry(native_synchronized)
+         Interpreter::_native_entry_end = Interpreter::code()->code_end();
+ 
+ #undef method_entry
++      
++      
++      set_external_pointers();
+ 
+       // Bytecodes
+       set_entry_points_for_all_bytes();
+     }
+   } while (CodeCacheExtensions::needs_other_interpreter_variant());
+ 
+   // installation of code in other places in the runtime
+   // (ExcutableCodeManager calls not needed to copy the entries)
+   set_safepoints_for_all_bytes();
+ }
+ 
+ //------------------------------------------------------------------------------------------------------------------------
+ 
+ address TemplateInterpreterGenerator::generate_error_exit(const char* msg) {
+   address entry = __ pc();
+   __ stop(msg);
+   return entry;
+ }
+ 
+ 
+ //------------------------------------------------------------------------------------------------------------------------
+ 
+ void TemplateInterpreterGenerator::set_entry_points_for_all_bytes() {
+   for (int i = 0; i < DispatchTable::length; i++) {
+     Bytecodes::Code code = (Bytecodes::Code)i;
+     if (Bytecodes::is_defined(code)) {
+       set_entry_points(code);
+     } else {
+       set_unimplemented(i);
+     }
+   }
+ }
+ 
+ 
+ void TemplateInterpreterGenerator::set_safepoints_for_all_bytes() {
+   for (int i = 0; i < DispatchTable::length; i++) {
+     Bytecodes::Code code = (Bytecodes::Code)i;
+     if (Bytecodes::is_defined(code)) Interpreter::_safept_table.set_entry(code, Interpreter::_safept_entry);
+   }
+ }
+ 
+ 
+ void TemplateInterpreterGenerator::set_unimplemented(int i) {
+   address e = _unimplemented_bytecode;
+   EntryPoint entry(e, e, e, e, e, e, e, e, e);
+   Interpreter::_normal_table.set_entry(i, entry);
+   Interpreter::_wentry_point[i] = _unimplemented_bytecode;
+ }
+ 
+ 
+ void TemplateInterpreterGenerator::set_entry_points(Bytecodes::Code code) {
+   if (CodeCacheExtensions::skip_template_interpreter_entries(code)) {
+     return;
+   }
+   CodeletMark cm(_masm, Bytecodes::name(code), code);
+   // initialize entry points
+   assert(_unimplemented_bytecode    != NULL, "should have been generated before");
+   assert(_illegal_bytecode_sequence != NULL, "should have been generated before");
+   address bep = _illegal_bytecode_sequence;
+   address cep = _illegal_bytecode_sequence;
+   address sep = _illegal_bytecode_sequence;
+   address aep = _illegal_bytecode_sequence;
+   address iep = _illegal_bytecode_sequence;
+   address lep = _illegal_bytecode_sequence;
+   address fep = _illegal_bytecode_sequence;
+   address dep = _illegal_bytecode_sequence;
+   address vep = _unimplemented_bytecode;
+   address wep = _unimplemented_bytecode;
+   // code for short & wide version of bytecode
+   if (Bytecodes::is_defined(code)) {
+     Template* t = TemplateTable::template_for(code);
+     assert(t->is_valid(), "just checking");
+     set_short_entry_points(t, bep, cep, sep, aep, iep, lep, fep, dep, vep);
++    printf("Generating template for code %d at bep=%p, cep=%p, sep=%p, aep=%p, iep=%p, lep=%p, fep=%p, dep=%p, vep=%p\n", code, bep, cep, sep, aep, iep, lep, fep, dep, vep);
++    if (code == 97 ) {
++        //vep = (address)addl_read_2_params;
++        //lep = (address)addl_read_1_param;
++      printf("Generating template for code %d at bep=%p, cep=%p, sep=%p, aep=%p, iep=%p, lep=%p, fep=%p, dep=%p, vep=%p\n", code, bep, cep, sep, aep, iep, lep, fep, dep, vep);
++    }
++    //CodeStrings _strings;
++    //tty->print("disaasemble 200 bytrs\n");
++    //Disassembler::decode(vep, vep+200, tty, DEBUG_ONLY(_strings) NOT_DEBUG(CodeStrings()));
++
+   }
+   if (Bytecodes::wide_is_defined(code)) {
+     Template* t = TemplateTable::template_for_wide(code);
+     assert(t->is_valid(), "just checking");
+     set_wide_entry_point(t, wep);
+   }
+   // set entry points
++  
+   EntryPoint entry(bep, cep, sep, aep, iep, lep, fep, dep, vep);
+   Interpreter::_normal_table.set_entry(code, entry);
+   Interpreter::_wentry_point[code] = wep;
+   CodeCacheExtensions::completed_template_interpreter_entries(_masm, code);
+ }
+ 
+ 
+ void TemplateInterpreterGenerator::set_wide_entry_point(Template* t, address& wep) {
+   assert(t->is_valid(), "template must exist");
+   assert(t->tos_in() == vtos, "only vtos tos_in supported for wide instructions");
+   wep = __ pc(); generate_and_dispatch(t);
+ }
+ 
+ 
+ void TemplateInterpreterGenerator::set_short_entry_points(Template* t, address& bep, address& cep, address& sep, address& aep, address& iep, address& lep, address& fep, address& dep, address& vep) {
+   assert(t->is_valid(), "template must exist");
+   switch (t->tos_in()) {
+     case btos:
+     case ctos:
+     case stos:
+       ShouldNotReachHere();  // btos/ctos/stos should use itos.
+       break;
+     case atos: vep = __ pc(); __ pop(atos); aep = __ pc(); generate_and_dispatch(t); break;
+     case itos: vep = __ pc(); __ pop(itos); iep = __ pc(); generate_and_dispatch(t); break;
+     case ltos: vep = __ pc(); __ pop(ltos); lep = __ pc(); generate_and_dispatch(t); break;
+     case ftos: vep = __ pc(); __ pop(ftos); fep = __ pc(); generate_and_dispatch(t); break;
+     case dtos: vep = __ pc(); __ pop(dtos); dep = __ pc(); generate_and_dispatch(t); break;
+     case vtos: set_vtos_entry_points(t, bep, cep, sep, aep, iep, lep, fep, dep, vep);     break;
+     default  : ShouldNotReachHere();                                                 break;
+   }
+ }
+ 
+ 
+ //------------------------------------------------------------------------------------------------------------------------
+ 
+ void TemplateInterpreterGenerator::generate_and_dispatch(Template* t, TosState tos_out) {
+   if (PrintBytecodeHistogram)                                    histogram_bytecode(t);
+ #ifndef PRODUCT
+   // debugging code
+   if (CountBytecodes || TraceBytecodes || StopInterpreterAt > 0) count_bytecode();
+diff -r baa2257348b6 src/share/vm/interpreter/templateInterpreterGenerator.hpp
+--- a/src/share/vm/interpreter/templateInterpreterGenerator.hpp	Thu Sep 03 14:24:41 2015 -0700
++++ b/src/share/vm/interpreter/templateInterpreterGenerator.hpp	Mon Oct 26 12:20:16 2015 +0300
+@@ -41,70 +41,71 @@
+   // Converter for native abi result to tosca result
+   address generate_result_handler_for(BasicType type);
+   address generate_slow_signature_handler();
+   address generate_error_exit(const char* msg);
+   address generate_StackOverflowError_handler();
+   address generate_exception_handler(const char* name, const char* message) {
+     return generate_exception_handler_common(name, message, false);
+   }
+   address generate_klass_exception_handler(const char* name) {
+     return generate_exception_handler_common(name, NULL, true);
+   }
+   address generate_exception_handler_common(const char* name, const char* message, bool pass_oop);
+   address generate_ClassCastException_handler();
+   address generate_ArrayIndexOutOfBounds_handler(const char* name);
+   address generate_continuation_for(TosState state);
+   address generate_return_entry_for(TosState state, int step, size_t index_size);
+   address generate_earlyret_entry_for(TosState state);
+   address generate_deopt_entry_for(TosState state, int step);
+   address generate_safept_entry_for(TosState state, address runtime_entry);
+   void    generate_throw_exception();
+ 
+   // Instruction generation
+   void generate_and_dispatch (Template* t, TosState tos_out = ilgl);
+   void set_vtos_entry_points (Template* t, address& bep, address& cep, address& sep, address& aep, address& iep, address& lep, address& fep, address& dep, address& vep);
+   void set_short_entry_points(Template* t, address& bep, address& cep, address& sep, address& aep, address& iep, address& lep, address& fep, address& dep, address& vep);
+   void set_wide_entry_point  (Template* t, address& wep);
+ 
+   void set_entry_points(Bytecodes::Code code);
+   void set_unimplemented(int i);
+   void set_entry_points_for_all_bytes();
+   void set_safepoints_for_all_bytes();
+ 
+   // Helpers for generate_and_dispatch
+   address generate_trace_code(TosState state)   PRODUCT_RETURN0;
+   void count_bytecode()                         PRODUCT_RETURN;
+   void histogram_bytecode(Template* t)          PRODUCT_RETURN;
+   void histogram_bytecode_pair(Template* t)     PRODUCT_RETURN;
+   void trace_bytecode(Template* t)              PRODUCT_RETURN;
+   void stop_interpreter_at()                    PRODUCT_RETURN;
+ 
++  static void set_external_pointers();
+   void generate_all();
+ 
+  public:
+   TemplateInterpreterGenerator(StubQueue* _code);
+ 
+ #ifdef TARGET_ARCH_x86
+ # include "templateInterpreterGenerator_x86.hpp"
+ #endif
+ #ifdef TARGET_ARCH_sparc
+ # include "templateInterpreterGenerator_sparc.hpp"
+ #endif
+ #ifdef TARGET_ARCH_zero
+ # include "templateInterpreterGenerator_zero.hpp"
+ #endif
+ #ifdef TARGET_ARCH_arm
+ # include "templateInterpreterGenerator_arm.hpp"
+ #endif
+ #ifdef TARGET_ARCH_ppc
+ # include "templateInterpreterGenerator_ppc.hpp"
+ #endif
+ #ifdef TARGET_ARCH_aarch64
+ # include "templateInterpreterGenerator_aarch64.hpp"
+ #endif
+ 
+ 
+ };
+ 
+ #endif // !CC_INTERP
+ 
+ #endif // SHARE_VM_INTERPRETER_TEMPLATEINTERPRETERGENERATOR_HPP
+diff -r baa2257348b6 src/share/vm/interpreter/templateTable.hpp
+--- a/src/share/vm/interpreter/templateTable.hpp	Thu Sep 03 14:24:41 2015 -0700
++++ b/src/share/vm/interpreter/templateTable.hpp	Mon Oct 26 12:20:16 2015 +0300
+@@ -170,80 +170,82 @@
+   static void nofast_iload();
+   static void iload_internal(RewriteControl rc = may_rewrite);
+   static void aload_0_internal(RewriteControl rc = may_rewrite);
+ 
+   static void istore();
+   static void lstore();
+   static void fstore();
+   static void dstore();
+   static void astore();
+ 
+   static void wide_istore();
+   static void wide_lstore();
+   static void wide_fstore();
+   static void wide_dstore();
+   static void wide_astore();
+ 
+   static void iastore();
+   static void lastore();
+   static void fastore();
+   static void dastore();
+   static void aastore();
+   static void bastore();
+   static void castore();
+   static void sastore();
+ 
+   static void istore(int n);
+   static void lstore(int n);
+   static void fstore(int n);
+   static void dstore(int n);
+   static void astore(int n);
+ 
+   static void pop();
+   static void pop2();
+   static void dup();
+   static void dup_x1();
+   static void dup_x2();
+   static void dup2();
+   static void dup2_x1();
+   static void dup2_x2();
+   static void swap();
++  
++  static void no_dispatch_helper(address f_start, address f_end);
+ 
+   static void iop2(Operation op);
+   static void lop2(Operation op);
+   static void fop2(Operation op);
+   static void dop2(Operation op);
+ 
+   static void idiv();
+   static void irem();
+ 
+   static void lmul();
+   static void ldiv();
+   static void lrem();
+   static void lshl();
+   static void lshr();
+   static void lushr();
+ 
+   static void ineg();
+   static void lneg();
+   static void fneg();
+   static void dneg();
+ 
+   static void iinc();
+   static void wide_iinc();
+   static void convert();
+   static void lcmp();
+ 
+   static void float_cmp (bool is_float, int unordered_result);
+   static void float_cmp (int unordered_result);
+   static void double_cmp(int unordered_result);
+ 
+   static void count_calls(Register method, Register temp);
+   static void branch(bool is_jsr, bool is_wide);
+   static void if_0cmp   (Condition cc);
+   static void if_icmp   (Condition cc);
+   static void if_nullcmp(Condition cc);
+   static void if_acmp   (Condition cc);
+ 
+   static void _goto();
+   static void jsr();
+   static void ret();
